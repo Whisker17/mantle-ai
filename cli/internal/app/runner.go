@@ -162,6 +162,11 @@ func (s *runtimeState) newRootCommand() *cobra.Command {
 	cmd.AddCommand(s.newTransactionCommand())
 	cmd.AddCommand(s.newContractCommand())
 	cmd.AddCommand(s.newTokenCommand())
+	cmd.AddCommand(s.newSwapCommand())
+	cmd.AddCommand(s.newLendCommand())
+	cmd.AddCommand(s.newStakeCommand())
+	cmd.AddCommand(s.newYieldCommand())
+	cmd.AddCommand(s.newBridgeCommand())
 	cmd.AddCommand(newVersionCommand())
 
 	return cmd
@@ -716,12 +721,15 @@ func shouldOpenCache(commandPath string) bool {
 }
 
 func shouldInitProvider(commandPath string) bool {
-	switch normalizeCommandPath(commandPath) {
-	case "", "version", "schema", "providers", "providers list":
+	norm := normalizeCommandPath(commandPath)
+	if norm == "" || norm == "version" || norm == "schema" || norm == "providers" || norm == "providers list" {
 		return false
-	default:
-		return true
 	}
+	return strings.HasPrefix(norm, "chain") ||
+		strings.HasPrefix(norm, "balance") ||
+		strings.HasPrefix(norm, "tx") ||
+		strings.HasPrefix(norm, "contract") ||
+		strings.HasPrefix(norm, "token")
 }
 
 func normalizeCommandPath(commandPath string) string {
