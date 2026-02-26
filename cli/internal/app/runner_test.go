@@ -37,6 +37,16 @@ func TestRunnerProvidersList(t *testing.T) {
 	if len(out) == 0 {
 		t.Fatal("expected providers output, got empty")
 	}
+	foundAave := false
+	for _, item := range out {
+		if name, _ := item["name"].(string); name == "aave_v3" {
+			foundAave = true
+			break
+		}
+	}
+	if !foundAave {
+		t.Fatalf("expected providers output to include aave_v3, got %v", out)
+	}
 }
 
 func TestRunnerSchemaBypassesProviderInit(t *testing.T) {

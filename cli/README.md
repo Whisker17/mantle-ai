@@ -10,7 +10,7 @@ Agent-first Mantle retrieval CLI.
 - Contract read and call simulation
 - Token info, symbol resolution, token balances
 - Swap quotes (Agni, Merchant Moe, best-of routing)
-- Lending markets and rates (Lendle, Aurelius)
+- Lending markets and rates (Lendle, Aurelius, AAVE v3)
 - mETH staking info and quote
 - Yield opportunities (Pendle + lending aggregation)
 - Bridge quotes and status (official bridge + Across quote support)

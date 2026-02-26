@@ -763,6 +763,7 @@ func buildProviderInfos(settings config.Settings) []model.ProviderInfo {
 		{Name: "merchant_moe", Type: "dex", Capabilities: []string{"swap.quote"}},
 		{Name: "lendle", Type: "lending", Capabilities: []string{"lend.markets", "lend.rates"}},
 		{Name: "aurelius", Type: "lending", Capabilities: []string{"lend.markets", "lend.rates"}},
+		{Name: "aave_v3", Type: "lending", Capabilities: []string{"lend.markets", "lend.rates"}},
 		{Name: "meth", Type: "staking", Capabilities: []string{"stake.info", "stake.quote"}},
 		{Name: "mantle_bridge", Type: "bridge", Capabilities: []string{"bridge.quote", "bridge.status"}},
 		{Name: "across", Type: "bridge", RequiresKey: true, KeyEnvVarName: "ACROSS_API_KEY", Capabilities: []string{"bridge.quote"}},

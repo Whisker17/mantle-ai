@@ -13,6 +13,7 @@ import (
 	"github.com/mantle/mantle-ai/cli/internal/id"
 	"github.com/mantle/mantle-ai/cli/internal/model"
 	"github.com/mantle/mantle-ai/cli/internal/providers"
+	"github.com/mantle/mantle-ai/cli/internal/providers/aavev3"
 	"github.com/mantle/mantle-ai/cli/internal/providers/across"
 	"github.com/mantle/mantle-ai/cli/internal/providers/agni"
 	"github.com/mantle/mantle-ai/cli/internal/providers/aurelius"
@@ -115,7 +116,7 @@ func (s *runtimeState) newLendCommand() *cobra.Command {
 		},
 	}
 	markets.Flags().StringVar(&asset, "asset", "", "Optional asset symbol/address filter")
-	markets.Flags().StringVar(&protocol, "protocol", "all", "Protocol: lendle|aurelius|all")
+	markets.Flags().StringVar(&protocol, "protocol", "all", "Protocol: lendle|aurelius|aave_v3|all")
 
 	rates := &cobra.Command{
 		Use:   "rates",
@@ -136,7 +137,7 @@ func (s *runtimeState) newLendCommand() *cobra.Command {
 		},
 	}
 	rates.Flags().StringVar(&asset, "asset", "", "Optional asset symbol/address filter")
-	rates.Flags().StringVar(&protocol, "protocol", "all", "Protocol: lendle|aurelius|all")
+	rates.Flags().StringVar(&protocol, "protocol", "all", "Protocol: lendle|aurelius|aave_v3|all")
 
 	root.AddCommand(markets, rates)
 	return root
@@ -531,6 +532,21 @@ func (s *runtimeState) fetchYieldOpportunities(ctx context.Context, asset id.Ass
 			items = append(items, lendRatesToYield("aurelius", rates)...)
 		}
 	}
+	if s.settings.Providers["aave_v3"].Enabled {
+		provider := aavev3.New(aavev3.Config{Network: s.settings.Network, RPCURL: s.settings.RPCURL})
+		start := time.Now()
+		rates, err := provider.LendRates(ctx, asset)
+		statuses = append(statuses, model.ProviderStatus{Name: "aave_v3", Status: statusFromErr(err), LatencyMS: time.Since(start).Milliseconds()})
+		if err != nil {
+			partial = true
+			warnings = append(warnings, fmt.Sprintf("aave_v3 rates failed: %v", err))
+			if firstErr == nil {
+				firstErr = err
+			}
+		} else {
+			items = append(items, lendRatesToYield("aave_v3", rates)...)
+		}
+	}
 
 	filtered := make([]model.YieldOpportunity, 0, len(items))
 	for _, item := range items {
@@ -693,8 +709,17 @@ func (s *runtimeState) lendingProviderEntries(protocol string) ([]struct {
 			}{name: "aurelius", provider: aurelius.New(aurelius.Config{Timeout: s.settings.Timeout, Retries: s.settings.Retries})})
 		}
 	}
-	if opt != "all" && opt != "lendle" && opt != "aurelius" {
-		return nil, clierr.New(clierr.CodeUsage, "protocol must be lendle, aurelius, or all")
+	switch opt {
+	case "aave_v3", "aave", "all":
+		if s.settings.Providers["aave_v3"].Enabled {
+			items = append(items, struct {
+				name     string
+				provider providers.LendingProvider
+			}{name: "aave_v3", provider: aavev3.New(aavev3.Config{Network: s.settings.Network, RPCURL: s.settings.RPCURL})})
+		}
+	}
+	if opt != "all" && opt != "lendle" && opt != "aurelius" && opt != "aave_v3" && opt != "aave" {
+		return nil, clierr.New(clierr.CodeUsage, "protocol must be lendle, aurelius, aave_v3, or all")
 	}
 	if len(items) == 0 {
 		return nil, clierr.New(clierr.CodeUnavailable, "no enabled lending providers for selected protocol")
