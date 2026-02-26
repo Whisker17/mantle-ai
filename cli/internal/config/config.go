@@ -141,7 +141,7 @@ func defaultSettings() (Settings, error) {
 		return Settings{}, err
 	}
 	providers := map[string]ProviderSettings{}
-	for _, name := range []string{"rpc", "agni", "merchant_moe", "lendle", "aurelius", "meth", "mantle_bridge", "across", "pendle", "defillama"} {
+	for _, name := range []string{"rpc", "agni", "merchant_moe", "lendle", "aurelius", "aave_v3", "meth", "mantle_bridge", "across", "pendle", "defillama"} {
 		providers[name] = ProviderSettings{Enabled: true}
 	}
 	return Settings{
