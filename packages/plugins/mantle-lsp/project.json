@@ -1,0 +1,13 @@
+{
+  "name": "mantle-lsp",
+  "projectType": "library",
+  "tags": ["type:plugin", "scope:mantle"],
+  "targets": {
+    "validate": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node scripts/validate-plugin.cjs packages/plugins/mantle-lsp"
+      }
+    }
+  }
+}

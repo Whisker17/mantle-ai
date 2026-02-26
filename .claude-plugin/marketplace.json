@@ -1,0 +1,19 @@
+{
+  "name": "mantle-ai",
+  "version": "1.0.0",
+  "owner": {
+    "name": "Mantle",
+    "email": "devrel@mantle.xyz"
+  },
+  "metadata": {
+    "description": "Mantle-focused AI plugins, skills, and runtime tooling.",
+    "repository": "https://github.com/mantle/mantle-ai"
+  },
+  "plugins": [
+    { "name": "mantle-core", "source": "./packages/plugins/mantle-core", "description": "Mantle core network and development guidance" },
+    { "name": "mantle-lsp", "source": "./packages/plugins/mantle-lsp", "description": "mETH liquid staking guidance" },
+    { "name": "mantle-defi", "source": "./packages/plugins/mantle-defi", "description": "Mantle DeFi integrations and strategy guidance" },
+    { "name": "mantle-bridge", "source": "./packages/plugins/mantle-bridge", "description": "L1/L2 bridge operations guidance" },
+    { "name": "mantle-mcp", "source": "./packages/plugins/mantle-mcp", "description": "MCP server usage and integration guidance" }
+  ]
+}
