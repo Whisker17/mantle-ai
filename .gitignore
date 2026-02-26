@@ -1,0 +1,15 @@
+# Worktrees
+.worktrees/
+worktrees/
+
+# Node
+node_modules/
+dist/
+.nx/
+
+# Go
+cli/mantle
+cli/coverage.out
+
+# OS
+.DS_Store
