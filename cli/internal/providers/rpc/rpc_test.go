@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -87,5 +88,23 @@ func TestGetBalanceWithMockRPC(t *testing.T) {
 	}
 	if balance.MNTBalance.AmountBaseUnits == "" {
 		t.Fatal("expected balance amount")
+	}
+}
+
+func TestChainInfoDAReflectsEthereumBlobs(t *testing.T) {
+	mainnet, err := chainInfoByNetwork("mainnet", "https://example-rpc")
+	if err != nil {
+		t.Fatalf("mainnet chain info failed: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(mainnet.DALayer), "blob") {
+		t.Fatalf("expected mainnet DA layer to mention blobs, got %q", mainnet.DALayer)
+	}
+
+	sepolia, err := chainInfoByNetwork("sepolia", "https://example-rpc")
+	if err != nil {
+		t.Fatalf("sepolia chain info failed: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(sepolia.DALayer), "blob") {
+		t.Fatalf("expected sepolia DA layer to mention blobs, got %q", sepolia.DALayer)
 	}
 }
