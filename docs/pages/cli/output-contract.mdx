@@ -1,0 +1,68 @@
+# Output Contract
+
+## Status
+
+- Status: Implemented
+- Verified against: `cli/internal/model/types.go`, `cli/internal/out/render.go`, `cli/internal/errors/errors.go`
+
+## Envelope
+
+Default output is a JSON envelope:
+
+```json
+{
+  "version": "v1",
+  "success": true,
+  "data": {},
+  "error": null,
+  "warnings": [],
+  "meta": {
+    "request_id": "...",
+    "timestamp": "2026-02-27T00:00:00Z",
+    "command": "chain info",
+    "providers": [],
+    "cache": {"status": "miss", "age_ms": 0, "stale": false},
+    "partial": false
+  }
+}
+```
+
+## Output Controls
+
+- `--results-only`: output only `data`
+- `--select a,b,c`: projection for top-level fields
+- `--plain`: plain text (stable key=value lines)
+
+## Error Contract
+
+Error output still uses envelope shape with:
+
+- `success: false`
+- `data: []`
+- `error.code` and `error.type`
+
+## Exit Codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | success |
+| `1` | internal error |
+| `2` | usage / validation error |
+| `10` | auth required / failed |
+| `11` | rate limited |
+| `12` | provider unavailable |
+| `13` | unsupported |
+| `14` | stale data beyond budget |
+| `15` | partial results in strict mode |
+| `16` | blocked by allowlist |
+
+## Caching Metadata
+
+`meta.cache.status` values:
+
+- `bypass`: command does not use cache
+- `miss`: no cache hit
+- `hit`: served from cache
+- `write`: fresh data was written to cache
+
+When stale fallback is used, `warnings` includes a stale warning and `meta.cache.stale` is `true`.

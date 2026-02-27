@@ -1,0 +1,62 @@
+# Contract and Token Commands
+
+## Verification
+
+- Status: Implemented
+- Verified against: `cli/internal/app/runner.go`
+
+## `contract read`
+
+- Status: Implemented
+- Syntax: `mantle contract read <address> <function> [args...]`
+- Purpose: execute read-only contract call.
+
+Example:
+
+```bash
+./mantle contract read 0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9 "decimals()" --results-only
+```
+
+## `contract call`
+
+- Status: Implemented
+- Syntax: `mantle contract call <address> <function> [args...] --from <address> [--value <mnt>]`
+- Purpose: simulate a state-changing call and estimate gas.
+- Required flag: `--from`
+- Optional flag: `--value`
+
+Example:
+
+```bash
+./mantle contract call 0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9 "transfer(address,uint256)" 0x2222222222222222222222222222222222222222 1000 --from 0x1111111111111111111111111111111111111111 --results-only
+```
+
+## `token info <address>`
+
+- Status: Implemented
+- Purpose: return ERC-20 metadata.
+- Cache TTL: `1h`
+
+```bash
+./mantle token info 0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9 --results-only
+```
+
+## `token resolve <symbol>`
+
+- Status: Implemented
+- Purpose: resolve symbol to known token address.
+- Cache TTL: `1h`
+
+```bash
+./mantle token resolve USDC --results-only
+```
+
+## `token balances <address>`
+
+- Status: Implemented
+- Purpose: return known token balances for address.
+- Cache TTL: `30s`
+
+```bash
+./mantle token balances 0x1111111111111111111111111111111111111111 --results-only
+```

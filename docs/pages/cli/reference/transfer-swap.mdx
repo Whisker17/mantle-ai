@@ -1,0 +1,50 @@
+# Transfer and Swap Commands
+
+## Verification
+
+- Status: Implemented
+- Verified against: `cli/internal/app/runner_phase2.go`
+
+## `transfer simulate`
+
+- Status: Implemented
+- Syntax:
+
+```bash
+mantle transfer simulate --from <address> --to <address> --amount <decimal> [--asset <symbol|address|caip19>]
+```
+
+- Purpose: simulate native or ERC-20 transfer with gas estimate.
+- Required flags: `--from`, `--to`, `--amount`
+- Optional flag: `--asset` (default `MNT`)
+- Cache TTL: `30s`
+
+Example:
+
+```bash
+./mantle transfer simulate --from 0x1111111111111111111111111111111111111111 --to 0x2222222222222222222222222222222222222222 --asset MNT --amount 0.01 --results-only
+```
+
+## `swap quote`
+
+- Status: Implemented
+- Syntax:
+
+```bash
+mantle swap quote --from <token> --to <token> --amount <decimal> [--fee-tier <500|3000|10000>] [--provider <agni|merchant_moe|best>]
+```
+
+- Required flags: `--from`, `--to`, `--amount`
+- Optional flags: `--fee-tier` (default `3000`), `--provider` (default `best`)
+- Cache TTL: `15s`
+
+Examples:
+
+```bash
+./mantle swap quote --from USDC --to WMNT --amount 100 --provider best --results-only
+./mantle swap quote --from USDC --to WMNT --amount 100 --provider agni --fee-tier 500 --results-only
+```
+
+## Selection Behavior (`provider=best`)
+
+When `provider=best`, CLI queries enabled providers and selects the quote with highest `estimated_out.amount_base_units`.

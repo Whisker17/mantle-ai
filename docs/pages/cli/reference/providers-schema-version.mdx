@@ -1,0 +1,51 @@
+# Providers, Schema, and Version Commands
+
+## Verification
+
+- Status: Implemented
+- Verified against: `cli/internal/app/runner.go`, `cli/internal/app/runner_phase2.go`
+
+## `providers list`
+
+- Status: Implemented
+- Syntax: `mantle providers list`
+- Purpose: show providers, enablement, auth requirements, and capabilities.
+
+```bash
+./mantle providers list --results-only
+```
+
+## `providers doctor`
+
+- Status: Implemented
+- Syntax: `mantle providers doctor [--provider <name|all>]`
+- Default: `--provider all`
+- Purpose: run runtime health checks and return availability/latency.
+
+```bash
+./mantle providers doctor --provider all --results-only
+```
+
+Valid provider names: `rpc`, `agni`, `merchant_moe`, `lendle`, `aurelius`, `aave_v3`, `meth`, `mantle_bridge`, `across`, `pendle`, `defillama`.
+
+## `schema [command path]`
+
+- Status: Implemented
+- Syntax: `mantle schema [command path]`
+- Purpose: print machine-readable command schema for discovery.
+
+```bash
+./mantle schema --results-only
+./mantle schema "swap quote" --results-only
+```
+
+## `version`
+
+- Status: Implemented
+- Syntax: `mantle version [--long]`
+- Purpose: print CLI version or extended build metadata.
+
+```bash
+./mantle version
+./mantle version --long
+```
