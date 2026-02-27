@@ -1,6 +1,10 @@
 package id
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/ethereum/go-ethereum/common"
+)
 
 func TestParseChainVariants(t *testing.T) {
 	cases := []struct {
@@ -63,5 +67,38 @@ func TestNormalizeAmount(t *testing.T) {
 	}
 	if base != "1000000" || dec != "1" {
 		t.Fatalf("unexpected output base=%s dec=%s", base, dec)
+	}
+}
+
+func TestTokenRegistryAddressesAreValidHex(t *testing.T) {
+	for chainID, tokens := range tokenRegistry {
+		for _, token := range tokens {
+			if !common.IsHexAddress(token.Address) {
+				t.Fatalf("invalid token address for chain=%s symbol=%s address=%s", chainID, token.Symbol, token.Address)
+			}
+		}
+	}
+}
+
+func TestParseAssetSepoliaUsesConfiguredTokenAddresses(t *testing.T) {
+	chain, err := ParseChain("sepolia")
+	if err != nil {
+		t.Fatalf("ParseChain(sepolia) failed: %v", err)
+	}
+
+	usdc, err := ParseAsset("USDC", chain)
+	if err != nil {
+		t.Fatalf("ParseAsset(USDC, sepolia) failed: %v", err)
+	}
+	if usdc.Address != "0xacab8129e2ce587fd203fd770ec9ecafa2c88080" {
+		t.Fatalf("unexpected sepolia usdc address: %s", usdc.Address)
+	}
+
+	wmnt, err := ParseAsset("WMNT", chain)
+	if err != nil {
+		t.Fatalf("ParseAsset(WMNT, sepolia) failed: %v", err)
+	}
+	if wmnt.Address != "0x67a1f4a939b477a6b7c5bf94d97e45de87e608ef" {
+		t.Fatalf("unexpected sepolia wmnt address: %s", wmnt.Address)
 	}
 }

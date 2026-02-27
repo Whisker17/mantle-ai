@@ -9,7 +9,10 @@ import (
 	"time"
 
 	"github.com/mantle/mantle-ai/cli/internal/config"
+	clierr "github.com/mantle/mantle-ai/cli/internal/errors"
+	"github.com/mantle/mantle-ai/cli/internal/id"
 	"github.com/mantle/mantle-ai/cli/internal/model"
+	"github.com/mantle/mantle-ai/cli/internal/providers"
 )
 
 type schemaNode struct {
@@ -170,6 +173,62 @@ func TestRunYieldCollectorsFastSuccessNotBlockedBySlowFailure(t *testing.T) {
 	}
 	if elapsed > 250*time.Millisecond {
 		t.Fatalf("expected parallel execution under timeout budget, elapsed=%s", elapsed)
+	}
+}
+
+func TestFetchBestSwapQuoteReturnsNetworkLevelUnsupportedOnSepolia(t *testing.T) {
+	state := &runtimeState{
+		settings: config.Settings{
+			Network: "sepolia",
+			RPCURL:  "https://rpc.sepolia.mantle.xyz",
+			Providers: map[string]config.ProviderSettings{
+				"agni":         {Enabled: false},
+				"merchant_moe": {Enabled: false},
+			},
+		},
+	}
+
+	req := providers.SwapQuoteRequest{
+		FromAsset: id.Asset{
+			Address:  "0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9",
+			Symbol:   "USDC",
+			Decimals: 6,
+		},
+		ToAsset: id.Asset{
+			Address:  "0xdEAddEaDdeadDEadDEADDEAddEADDEAddead1111",
+			Symbol:   "WMNT",
+			Decimals: 18,
+		},
+		AmountBaseUnits: "1000000",
+		AmountDecimal:   "1",
+		FeeTier:         3000,
+	}
+
+	data, statuses, warnings, partial, err := state.fetchBestSwapQuote(context.Background(), req)
+	if err == nil {
+		t.Fatalf("expected error when sepolia swap providers are not configured")
+	}
+	if data != nil {
+		t.Fatalf("expected nil data, got %+v", data)
+	}
+	if !partial {
+		t.Fatalf("expected partial=true when providers are unavailable")
+	}
+	if len(statuses) != 2 {
+		t.Fatalf("expected 2 provider statuses, got %d", len(statuses))
+	}
+	if len(warnings) != 2 {
+		t.Fatalf("expected 2 warnings, got %d: %v", len(warnings), warnings)
+	}
+	typed, ok := clierr.As(err)
+	if !ok {
+		t.Fatalf("expected typed cli error, got %T", err)
+	}
+	if typed.Code != clierr.CodeUnsupported {
+		t.Fatalf("expected unsupported code, got %d (%v)", typed.Code, typed)
+	}
+	if !strings.Contains(strings.ToLower(typed.Message), "no swap quote providers configured for network sepolia") {
+		t.Fatalf("unexpected error message: %s", typed.Message)
 	}
 }
 

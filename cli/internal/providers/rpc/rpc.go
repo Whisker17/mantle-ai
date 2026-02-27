@@ -168,33 +168,67 @@ func (p *Provider) GetTransaction(ctx context.Context, hash string) (model.Trans
 	}
 	txHash := common.HexToHash(hash)
 	tx, _, err := p.client.TransactionByHash(ctx, txHash)
-	if err != nil {
+	unsupportedType := err != nil && strings.Contains(strings.ToLower(err.Error()), "transaction type not supported")
+	if err != nil && !unsupportedType {
 		return model.TransactionInfo{}, clierr.Wrap(clierr.CodeUnavailable, "get transaction", err)
 	}
+
+	from := ""
+	to := ""
+	value := big.NewInt(0)
+	gasPriceFromTx := big.NewInt(0)
+	input := "0x"
+
+	if unsupportedType {
+		rawTx, rawErr := p.getTransactionRaw(ctx, txHash)
+		if rawErr != nil {
+			return model.TransactionInfo{}, clierr.Wrap(clierr.CodeUnavailable, "get transaction", rawErr)
+		}
+		from = strings.ToLower(rawTx.From)
+		if rawTx.To != nil {
+			to = strings.ToLower(*rawTx.To)
+		}
+		value, err = parseRPCQuantityBigInt(rawTx.Value)
+		if err != nil {
+			return model.TransactionInfo{}, clierr.Wrap(clierr.CodeUnavailable, "parse transaction value", err)
+		}
+		gasPriceFromTx, err = parseRPCQuantityBigInt(rawTx.GasPrice)
+		if err != nil {
+			return model.TransactionInfo{}, clierr.Wrap(clierr.CodeUnavailable, "parse transaction gas price", err)
+		}
+		if strings.TrimSpace(rawTx.Input) != "" {
+			input = rawTx.Input
+		}
+	} else {
+		if signer := types.LatestSignerForChainID(tx.ChainId()); signer != nil {
+			if sender, senderErr := types.Sender(signer, tx); senderErr == nil {
+				from = strings.ToLower(sender.Hex())
+			}
+		}
+		if tx.To() != nil {
+			to = strings.ToLower(tx.To().Hex())
+		}
+		value = tx.Value()
+		gasPriceFromTx = tx.GasPrice()
+		input = fmt.Sprintf("0x%x", tx.Data())
+	}
+
 	receipt, err := p.client.TransactionReceipt(ctx, txHash)
 	if err != nil {
 		return model.TransactionInfo{}, clierr.Wrap(clierr.CodeUnavailable, "get transaction receipt", err)
 	}
 
-	from := ""
-	if signer := types.LatestSignerForChainID(tx.ChainId()); signer != nil {
-		if sender, senderErr := types.Sender(signer, tx); senderErr == nil {
-			from = strings.ToLower(sender.Hex())
-		}
-	}
-	to := ""
-	if tx.To() != nil {
-		to = strings.ToLower(tx.To().Hex())
-	}
-
-	block, err := p.client.BlockByNumber(ctx, new(big.Int).SetUint64(receipt.BlockNumber.Uint64()))
+	timestamp, err := p.getBlockTimestamp(ctx, receipt.BlockNumber)
 	if err != nil {
 		return model.TransactionInfo{}, clierr.Wrap(clierr.CodeUnavailable, "get transaction block", err)
 	}
 
 	gasPrice := receipt.EffectiveGasPrice
 	if gasPrice == nil {
-		gasPrice = tx.GasPrice()
+		gasPrice = gasPriceFromTx
+	}
+	if gasPrice == nil {
+		gasPrice = big.NewInt(0)
 	}
 	fee := new(big.Int).Mul(new(big.Int).SetUint64(receipt.GasUsed), gasPrice)
 
@@ -202,8 +236,6 @@ func (p *Provider) GetTransaction(ctx context.Context, hash string) (model.Trans
 	if receipt.Status == types.ReceiptStatusSuccessful {
 		status = "success"
 	}
-
-	value := tx.Value()
 
 	return model.TransactionInfo{
 		Hash: txHash.Hex(),
@@ -218,11 +250,62 @@ func (p *Provider) GetTransaction(ctx context.Context, hash string) (model.Trans
 		GasPrice:    gasPrice.String(),
 		FeeMNT:      id.FormatDecimalCompat(fee.String(), 18),
 		BlockNumber: receipt.BlockNumber.Uint64(),
-		Timestamp:   time.Unix(int64(block.Time()), 0).UTC(),
+		Timestamp:   timestamp,
 		Status:      status,
-		Input:       fmt.Sprintf("0x%x", tx.Data()),
+		Input:       input,
 		ExplorerURL: fmt.Sprintf("%s/tx/%s", p.chainConfig.ExplorerURL, txHash.Hex()),
 	}, nil
+}
+
+type rawRPCTransaction struct {
+	Hash     string  `json:"hash"`
+	From     string  `json:"from"`
+	To       *string `json:"to"`
+	Value    string  `json:"value"`
+	Input    string  `json:"input"`
+	GasPrice string  `json:"gasPrice"`
+}
+
+func (p *Provider) getTransactionRaw(ctx context.Context, txHash common.Hash) (rawRPCTransaction, error) {
+	if p.client == nil || p.client.Client() == nil {
+		return rawRPCTransaction{}, clierr.New(clierr.CodeUnavailable, "rpc client unavailable")
+	}
+
+	var tx *rawRPCTransaction
+	if err := p.client.Client().CallContext(ctx, &tx, "eth_getTransactionByHash", txHash.Hex()); err != nil {
+		return rawRPCTransaction{}, err
+	}
+	if tx == nil {
+		return rawRPCTransaction{}, clierr.New(clierr.CodeUnavailable, "transaction not found")
+	}
+	return *tx, nil
+}
+
+type rawRPCBlock struct {
+	Timestamp string `json:"timestamp"`
+}
+
+func (p *Provider) getBlockTimestamp(ctx context.Context, blockNumber *big.Int) (time.Time, error) {
+	if blockNumber == nil {
+		return time.Time{}, clierr.New(clierr.CodeUnavailable, "transaction block number is missing")
+	}
+	if p.client == nil || p.client.Client() == nil {
+		return time.Time{}, clierr.New(clierr.CodeUnavailable, "rpc client unavailable")
+	}
+
+	var block *rawRPCBlock
+	if err := p.client.Client().CallContext(ctx, &block, "eth_getBlockByNumber", fmt.Sprintf("0x%x", blockNumber), false); err != nil {
+		return time.Time{}, err
+	}
+	if block == nil {
+		return time.Time{}, clierr.New(clierr.CodeUnavailable, "transaction block not found")
+	}
+
+	ts, err := parseRPCQuantityUint64(block.Timestamp)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Unix(int64(ts), 0).UTC(), nil
 }
 
 func (p *Provider) ReadContract(ctx context.Context, req providers.ContractReadRequest) (model.ContractResult, error) {
@@ -510,6 +593,50 @@ func chainIDFromNetwork(network string) string {
 		return "eip155:5003"
 	}
 	return "eip155:5000"
+}
+
+func parseRPCQuantityBigInt(raw string) (*big.Int, error) {
+	norm := strings.TrimSpace(raw)
+	if norm == "" {
+		return big.NewInt(0), nil
+	}
+
+	base := 10
+	if strings.HasPrefix(norm, "0x") || strings.HasPrefix(norm, "0X") {
+		base = 16
+		norm = norm[2:]
+	}
+	if norm == "" {
+		return big.NewInt(0), nil
+	}
+
+	v, ok := new(big.Int).SetString(norm, base)
+	if !ok {
+		return nil, clierr.New(clierr.CodeUnavailable, fmt.Sprintf("invalid rpc quantity: %s", raw))
+	}
+	return v, nil
+}
+
+func parseRPCQuantityUint64(raw string) (uint64, error) {
+	norm := strings.TrimSpace(raw)
+	if norm == "" {
+		return 0, nil
+	}
+
+	base := 10
+	if strings.HasPrefix(norm, "0x") || strings.HasPrefix(norm, "0X") {
+		base = 16
+		norm = norm[2:]
+	}
+	if norm == "" {
+		return 0, nil
+	}
+
+	v, err := strconv.ParseUint(norm, base, 64)
+	if err != nil {
+		return 0, clierr.New(clierr.CodeUnavailable, fmt.Sprintf("invalid rpc quantity: %s", raw))
+	}
+	return v, nil
 }
 
 func parseEtherDecimal(input string) (*big.Int, error) {

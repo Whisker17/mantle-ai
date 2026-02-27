@@ -10,7 +10,7 @@ type Token struct {
 
 var tokenRegistry = map[string][]Token{
 	"eip155:5000": {
-		{Symbol: "WMNT", Address: "0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb", Decimals: 18},
+		{Symbol: "WMNT", Address: "0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8", Decimals: 18},
 		{Symbol: "WETH", Address: "0xdEAddEaDdeadDEadDEADDEAddEADDEAddead1111", Decimals: 18},
 		{Symbol: "USDC", Address: "0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9", Decimals: 6},
 		{Symbol: "USDT", Address: "0x201EBa5CC46D216Ce6DC03F6a759e8E766e956aE", Decimals: 6},
@@ -20,8 +20,9 @@ var tokenRegistry = map[string][]Token{
 		{Symbol: "COOK", Address: "0x31dCcD8774b8b07E4370c9E39F80884E3F77D0f0", Decimals: 18},
 	},
 	"eip155:5003": {
-		{Symbol: "WMNT", Address: "0xdEAddEaDdeadDEadDEADDEAddEADDEAddead1111", Decimals: 18},
-		{Symbol: "USDC", Address: "0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9", Decimals: 6},
+		{Symbol: "WMNT", Address: "0x67A1f4A939b477A6b7c5BF94D97E45dE87E608eF", Decimals: 18},
+		{Symbol: "USDC", Address: "0xaCab8129e2ce587fd203FD770EC9ecafa2c88080", Decimals: 6},
+		{Symbol: "USDT", Address: "0xcC4Ac915857532adA58D69493554C6d869932fE6", Decimals: 6},
 	},
 }
 

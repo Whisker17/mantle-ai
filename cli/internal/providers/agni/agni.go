@@ -23,14 +23,35 @@ const quoterABIJSON = `[
     "name":"quoteExactInputSingle",
     "stateMutability":"view",
     "inputs":[
-      {"name":"tokenIn","type":"address"},
-      {"name":"tokenOut","type":"address"},
-      {"name":"fee","type":"uint24"},
-      {"name":"amountIn","type":"uint256"},
-      {"name":"sqrtPriceLimitX96","type":"uint160"}
+      {
+        "name":"params",
+        "type":"tuple",
+        "components":[
+          {"name":"tokenIn","type":"address"},
+          {"name":"tokenOut","type":"address"},
+          {"name":"amountIn","type":"uint256"},
+          {"name":"fee","type":"uint24"},
+          {"name":"sqrtPriceLimitX96","type":"uint160"}
+        ]
+      }
     ],
     "outputs":[
       {"name":"amountOut","type":"uint256"}
+    ]
+  }
+]`
+
+const routerABIJSON = `[
+  {
+    "type":"function",
+    "name":"getAmountsOut",
+    "stateMutability":"view",
+    "inputs":[
+      {"name":"amountIn","type":"uint256"},
+      {"name":"path","type":"address[]"}
+    ],
+    "outputs":[
+      {"name":"amounts","type":"uint256[]"}
     ]
   }
 ]`
@@ -44,7 +65,16 @@ type Provider struct {
 	client        *ethclient.Client
 	quoterAddress common.Address
 	routerAddress common.Address
-	abi           abi.ABI
+	quoterABI     abi.ABI
+	routerABI     abi.ABI
+}
+
+type quoteExactInputSingleParams struct {
+	TokenIn           common.Address
+	TokenOut          common.Address
+	AmountIn          *big.Int
+	Fee               *big.Int
+	SqrtPriceLimitX96 *big.Int
 }
 
 func New(cfg Config) (*Provider, error) {
@@ -59,15 +89,20 @@ func New(cfg Config) (*Provider, error) {
 	if err != nil {
 		return nil, clierr.Wrap(clierr.CodeUnavailable, "connect agni rpc", err)
 	}
-	parsed, err := abi.JSON(strings.NewReader(quoterABIJSON))
+	quoterABI, err := abi.JSON(strings.NewReader(quoterABIJSON))
 	if err != nil {
 		return nil, clierr.Wrap(clierr.CodeInternal, "parse agni quoter abi", err)
+	}
+	routerABI, err := abi.JSON(strings.NewReader(routerABIJSON))
+	if err != nil {
+		return nil, clierr.Wrap(clierr.CodeInternal, "parse agni router abi", err)
 	}
 	return &Provider{
 		client:        client,
 		quoterAddress: quoter,
 		routerAddress: router,
-		abi:           parsed,
+		quoterABI:     quoterABI,
+		routerABI:     routerABI,
 	}, nil
 }
 
@@ -104,36 +139,67 @@ func (p *Provider) QuoteSwap(ctx context.Context, req providers.SwapQuoteRequest
 		feeTier = 3000
 	}
 
-	data, err := p.abi.Pack(
-		"quoteExactInputSingle",
-		common.HexToAddress(req.FromAsset.Address),
-		common.HexToAddress(req.ToAsset.Address),
-		uint32(feeTier),
-		amountIn,
-		new(big.Int),
-	)
-	if err != nil {
-		return model.SwapQuote{}, clierr.Wrap(clierr.CodeInternal, "encode agni quote call", err)
-	}
-	msg := geth.CallMsg{To: &p.quoterAddress, Data: data}
-	raw, err := p.client.CallContract(ctx, msg, nil)
-	if err != nil {
-		return model.SwapQuote{}, clierr.Wrap(clierr.CodeUnavailable, "agni quote call failed", err)
-	}
-	out, err := p.abi.Unpack("quoteExactInputSingle", raw)
-	if err != nil || len(out) != 1 {
-		return model.SwapQuote{}, clierr.Wrap(clierr.CodeUnavailable, "decode agni quote", err)
-	}
-	amountOut, ok := out[0].(*big.Int)
-	if !ok {
-		return model.SwapQuote{}, clierr.New(clierr.CodeUnavailable, "invalid agni quote output type")
+	var amountOut *big.Int
+	gasUnits := int64(200000)
+	if p.quoterAddress != (common.Address{}) {
+		data, err := p.quoterABI.Pack(
+			"quoteExactInputSingle",
+			quoteExactInputSingleParams{
+				TokenIn:           common.HexToAddress(req.FromAsset.Address),
+				TokenOut:          common.HexToAddress(req.ToAsset.Address),
+				AmountIn:          amountIn,
+				Fee:               big.NewInt(int64(feeTier)),
+				SqrtPriceLimitX96: new(big.Int),
+			},
+		)
+		if err != nil {
+			return model.SwapQuote{}, clierr.Wrap(clierr.CodeInternal, "encode agni quote call", err)
+		}
+		msg := geth.CallMsg{To: &p.quoterAddress, Data: data}
+		raw, err := p.client.CallContract(ctx, msg, nil)
+		if err != nil {
+			return model.SwapQuote{}, clierr.Wrap(clierr.CodeUnavailable, "agni quote call failed", err)
+		}
+		out, err := p.quoterABI.Unpack("quoteExactInputSingle", raw)
+		if err != nil || len(out) != 1 {
+			return model.SwapQuote{}, clierr.Wrap(clierr.CodeUnavailable, "decode agni quote", err)
+		}
+		var ok bool
+		amountOut, ok = out[0].(*big.Int)
+		if !ok {
+			return model.SwapQuote{}, clierr.New(clierr.CodeUnavailable, "invalid agni quote output type")
+		}
+	} else {
+		path := []common.Address{
+			common.HexToAddress(req.FromAsset.Address),
+			common.HexToAddress(req.ToAsset.Address),
+		}
+		data, err := p.routerABI.Pack("getAmountsOut", amountIn, path)
+		if err != nil {
+			return model.SwapQuote{}, clierr.Wrap(clierr.CodeInternal, "encode agni router quote call", err)
+		}
+		msg := geth.CallMsg{To: &p.routerAddress, Data: data}
+		raw, err := p.client.CallContract(ctx, msg, nil)
+		if err != nil {
+			return model.SwapQuote{}, clierr.Wrap(clierr.CodeUnavailable, "agni router quote call failed", err)
+		}
+		out, err := p.routerABI.Unpack("getAmountsOut", raw)
+		if err != nil || len(out) != 1 {
+			return model.SwapQuote{}, clierr.Wrap(clierr.CodeUnavailable, "decode agni router quote", err)
+		}
+		amounts, ok := out[0].([]*big.Int)
+		if !ok || len(amounts) == 0 {
+			return model.SwapQuote{}, clierr.New(clierr.CodeUnavailable, "agni router quote returned empty path")
+		}
+		amountOut = amounts[len(amounts)-1]
+		gasUnits = 220000
 	}
 
 	gasPrice, err := p.client.SuggestGasPrice(ctx)
 	if err != nil {
 		gasPrice = big.NewInt(0)
 	}
-	estimatedGas := new(big.Int).Mul(gasPrice, big.NewInt(200000))
+	estimatedGas := new(big.Int).Mul(gasPrice, big.NewInt(gasUnits))
 
 	return model.SwapQuote{
 		Provider:  "agni",
@@ -162,7 +228,7 @@ func addressesForNetwork(network string) (common.Address, common.Address, error)
 	case "", "mainnet":
 		return common.HexToAddress("0xc4aaDc921E1cdb66c5300Bc158a313292923C0cb"), common.HexToAddress("0x319B69888b0d11cEC22caA5034e25FfFBDc88421"), nil
 	case "sepolia":
-		return common.Address{}, common.Address{}, clierr.New(clierr.CodeUnsupported, "agni is not configured on sepolia")
+		return common.Address{}, common.HexToAddress("0x3E30894AaEB2ba741b8E2999604D1d01fF6244ea"), nil
 	default:
 		return common.Address{}, common.Address{}, clierr.New(clierr.CodeUnsupported, fmt.Sprintf("unsupported network: %s", network))
 	}

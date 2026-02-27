@@ -4,17 +4,22 @@ Agent-first Mantle retrieval CLI.
 
 ## Features
 
-- Chain metadata and status
-- Address balances (MNT + known tokens)
-- Transaction lookup
-- Contract read and call simulation
-- Token info, symbol resolution, token balances
-- Swap quotes (Agni, Merchant Moe, best-of routing)
-- Lending markets and rates (Lendle, Aurelius, AAVE v3)
-- mETH staking info and quote
-- Yield opportunities (Pendle + lending aggregation)
-- Bridge quotes and status (official bridge + Across quote support)
-- Machine-readable command schema and providers metadata
+- [x] Chain metadata and status
+- [x] Address balances (MNT + known tokens)
+- [x] Transaction lookup
+- [x] Contract read and call simulation
+- [x] Token info, symbol resolution, token balances
+- [x] Swap quotes (Agni, Merchant Moe, best-of routing)
+- [x] Lending markets and rates (Lendle, Aurelius, AAVE v3)
+- [x] mETH staking info and quote
+- [x] Yield opportunities (Pendle + lending aggregation)
+- [x] Bridge quotes and status (official bridge + Across quote support)
+- [x] Machine-readable command schema and providers metadata
+
+## Regression validation rules
+
+- Mark a feature as done only after end-to-end CLI regression verification passes.
+- Run transfer/swap behavior regression on Mantle Sepolia (`network: sepolia`, `rpc_url_sepolia: https://rpc.sepolia.mantle.xyz`).
 
 ## Build and test
 
