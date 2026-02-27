@@ -1,0 +1,90 @@
+# Lend, Stake, Yield, and Bridge Commands
+
+## Verification
+
+- Status: Implemented
+- Verified against: `cli/internal/app/runner_phase2.go`
+
+## `lend markets`
+
+- Status: Implemented
+- Syntax: `mantle lend markets [--asset <asset>] [--protocol <lendle|aurelius|aave_v3|all>]`
+- Defaults: `--protocol all`
+- Cache TTL: `5m`
+
+```bash
+./mantle lend markets --protocol all --results-only
+```
+
+## `lend rates`
+
+- Status: Implemented
+- Syntax: `mantle lend rates [--asset <asset>] [--protocol <lendle|aurelius|aave_v3|all>]`
+- Defaults: `--protocol all`
+- Cache TTL: `30s`
+
+```bash
+./mantle lend rates --protocol aave_v3 --asset USDC --results-only
+```
+
+## `stake info`
+
+- Status: Implemented
+- Syntax: `mantle stake info`
+- Cache TTL: `1m`
+
+```bash
+./mantle stake info --results-only
+```
+
+## `stake quote`
+
+- Status: Implemented
+- Syntax: `mantle stake quote --action <stake|unstake> --amount <decimal>`
+- Required flags: `--action`, `--amount`
+- Cache TTL: `30s`
+
+```bash
+./mantle stake quote --action stake --amount 1 --results-only
+```
+
+## `yield opportunities`
+
+- Status: Implemented
+- Syntax: `mantle yield opportunities [--asset <asset>] [--min-apy <number>] [--limit <n>] [--sort-by <score|apy|tvl>]`
+- Defaults: `--min-apy 0`, `--limit 20`, `--sort-by score`
+- Cache TTL: `5m`
+
+```bash
+./mantle yield opportunities --limit 10 --sort-by score --results-only
+```
+
+## `bridge quote`
+
+- Status: Implemented
+- Syntax:
+
+```bash
+mantle bridge quote --from-chain <caip2> [--to-chain <caip2>] --asset <symbol|address> --amount <decimal> [--provider <official|across|best>]
+```
+
+- Required flags: `--asset`, `--amount`
+- Defaults: `--from-chain eip155:1`, `--provider best`
+- If `--to-chain` omitted, defaults to active Mantle network (`eip155:5000` or `eip155:5003`).
+- Cache TTL: `30s`
+
+```bash
+./mantle bridge quote --from-chain eip155:1 --to-chain eip155:5000 --asset USDC --amount 100 --provider best --results-only
+```
+
+## `bridge status <tx_hash>`
+
+- Status: Implemented
+- Syntax: `mantle bridge status <tx_hash> [--provider official] [--direction <deposit|withdrawal>]`
+- Provider support: currently only `official`
+- Defaults: `--provider official`, `--direction withdrawal`
+- Cache TTL: `30s`
+
+```bash
+./mantle bridge status 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --direction withdrawal --results-only
+```

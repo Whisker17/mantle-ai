@@ -1,0 +1,62 @@
+# Chain, Balance, and Transaction Commands
+
+## Verification
+
+- Status: Implemented
+- Verified against: `cli/internal/app/runner.go`
+
+## `chain info`
+
+- Status: Implemented
+- Syntax: `mantle chain info`
+- Purpose: return static Mantle chain configuration for active network.
+- Cache TTL: `1h`
+
+Example:
+
+```bash
+./mantle chain info --results-only
+```
+
+## `chain status`
+
+- Status: Implemented
+- Syntax: `mantle chain status`
+- Purpose: return block number, gas price, sync metadata.
+- Cache TTL: `15s`
+
+Example:
+
+```bash
+./mantle chain status --results-only
+```
+
+## `balance <address>`
+
+- Status: Implemented
+- Syntax: `mantle balance <address>`
+- Purpose: return native MNT and known token balances.
+- Cache TTL: `30s`
+
+Example:
+
+```bash
+./mantle balance 0x1111111111111111111111111111111111111111 --results-only
+```
+
+## `tx <hash>`
+
+- Status: Implemented
+- Syntax: `mantle tx <hash>`
+- Purpose: return transaction + receipt details.
+- Cache TTL: `24h`
+
+Example:
+
+```bash
+./mantle tx 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --results-only
+```
+
+## Common Flags
+
+These commands accept all global flags (for example `--network`, `--rpc-url`, `--timeout`, `--results-only`, `--strict`).

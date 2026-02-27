@@ -8,7 +8,10 @@
     "build": "npm run -ws --if-present build",
     "test": "npm run -ws --if-present test",
     "lint": "npm run -ws --if-present lint",
-    "validate": "node scripts/validate-all.sh"
+    "validate": "node scripts/validate-all.sh",
+    "docs:dev": "npm --prefix docs run dev",
+    "docs:build": "npm --prefix docs run build",
+    "docs:start": "npm --prefix docs run start"
   },
   "workspaces": [
     "mcp-server",

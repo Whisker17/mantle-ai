@@ -1,0 +1,43 @@
+# Getting Started
+
+## Status
+
+- Status: Implemented
+- Verified against: `cli/README.md`, `cli/Makefile`, `cli/internal/app/runner.go`
+
+## Build
+
+```bash
+go build -o mantle ./cli/cmd/mantle
+```
+
+## Basic Commands
+
+```bash
+./mantle version
+./mantle schema --results-only
+./mantle providers list --results-only
+./mantle chain info --results-only
+./mantle chain status --results-only
+```
+
+## DeFi Commands
+
+```bash
+./mantle swap quote --from USDC --to WMNT --amount 100 --provider best --results-only
+./mantle lend markets --protocol all --results-only
+./mantle stake info --results-only
+./mantle yield opportunities --limit 10 --sort-by score --results-only
+./mantle bridge quote --from-chain eip155:1 --to-chain eip155:5000 --asset USDC --amount 100 --provider best --results-only
+```
+
+## Network Selection
+
+Use `--network` for runtime context:
+
+```bash
+./mantle chain info --network mainnet --results-only
+./mantle chain info --network sepolia --results-only
+```
+
+Accepted network aliases include `mainnet`, `mantle`, `5000`, `eip155:5000`, `sepolia`, `5003`, and `eip155:5003`.

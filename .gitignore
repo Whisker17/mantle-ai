@@ -6,6 +6,8 @@ worktrees/
 node_modules/
 dist/
 .nx/
+.next/
+out/
 
 # Go
 cli/mantle

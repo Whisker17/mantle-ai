@@ -1,0 +1,52 @@
+# CLI Roadmap
+
+This page tracks planned CLI work and clearly distinguishes it from what exists today.
+
+## Current State
+
+- Implemented command tree is defined in:
+  - `cli/internal/app/runner.go`
+  - `cli/internal/app/runner_phase2.go`
+
+## Planned Items
+
+### 1) `mantle block` command family
+
+- Status: Planned
+- Why: improve parity with MCP block lookup capability and reduce ad-hoc RPC usage.
+- Planned shape:
+
+```bash
+mantle block latest
+mantle block get --number <n>
+```
+
+- Source: `specs/plans/2026-02-26-mantle-ai-full-scaffold-design.md` (MCP tool catalog includes block retrieval as a runtime capability target).
+
+### 2) `mantle contract encode` helper
+
+- Status: Planned
+- Why: provide deterministic ABI encoding workflows directly in CLI.
+- Planned shape:
+
+```bash
+mantle contract encode <function_signature> [args...]
+```
+
+- Source: `specs/plans/2026-02-26-mantle-ai-full-scaffold-design.md` (function encoding appears as a core tooling capability in cross-surface design).
+
+### 3) `mantle gas estimate` convenience command
+
+- Status: Planned
+- Why: make gas estimation a first-class command instead of only embedded in simulations.
+- Planned shape:
+
+```bash
+mantle gas estimate --from <addr> --to <addr> [--value <mnt>] [--data <hex>]
+```
+
+- Source: `specs/plans/2026-02-26-mantle-ai-full-scaffold-design.md` (explicit gas estimate capability in shared runtime direction).
+
+## Notes
+
+These roadmap commands are not currently invokable in the CLI binary. Use `mantle schema --results-only` to verify the implemented command surface.

@@ -1,0 +1,79 @@
+# Configuration
+
+## Status
+
+- Status: Implemented
+- Verified against: `cli/internal/config/config.go`
+
+## Precedence
+
+Configuration is applied in this order:
+
+1. Built-in defaults
+2. Config file (`~/.config/mantle/config.yaml` by default)
+3. Environment variables
+4. CLI flags
+
+## Config File
+
+Default path:
+
+```text
+${XDG_CONFIG_HOME:-~/.config}/mantle/config.yaml
+```
+
+Example:
+
+```yaml
+output: json
+strict: false
+timeout: 10s
+retries: 2
+network: mainnet
+rpc_url: https://rpc.mantle.xyz
+rpc_url_sepolia: https://rpc.sepolia.mantle.xyz
+
+cache:
+  enabled: true
+  max_stale: 5m
+  path: ~/.cache/mantle/cache.db
+  lock_path: ~/.cache/mantle/cache.lock
+
+providers:
+  across:
+    enabled: true
+    api_key_env: ACROSS_API_KEY
+```
+
+## Environment Variables
+
+- `MANTLE_OUTPUT`
+- `MANTLE_STRICT`
+- `MANTLE_TIMEOUT`
+- `MANTLE_RETRIES`
+- `MANTLE_MAX_STALE`
+- `MANTLE_NETWORK`
+- `MANTLE_RPC_URL`
+- `MANTLE_RPC_URL_SEPOLIA`
+- `ACROSS_API_KEY`
+
+## Global Flags
+
+| Flag | Type | Description |
+| --- | --- | --- |
+| `--json` | bool | Force JSON output |
+| `--plain` | bool | Force plain-text output |
+| `--results-only` | bool | Emit `data` only |
+| `--select` | string | Select output fields (comma-separated) |
+| `--strict` | bool | Fail on partial results |
+| `--timeout` | string | Provider request timeout |
+| `--retries` | int | Retry count per provider request |
+| `--max-stale` | string | Maximum stale fallback window after TTL expiry |
+| `--no-stale` | bool | Reject stale cache fallback |
+| `--no-cache` | bool | Disable cache reads and writes |
+| `--network` | string | `mainnet` or `sepolia` (aliases accepted) |
+| `--rpc-url` | string | Override RPC endpoint |
+| `--enable-commands` | string | Allowlist command paths |
+| `--config` | string | Override config file path |
+
+`--json` and `--plain` are mutually exclusive.

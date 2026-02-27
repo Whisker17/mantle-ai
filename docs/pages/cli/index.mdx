@@ -1,0 +1,33 @@
+# Mantle CLI
+
+`mantle` is an agent-first Mantle retrieval CLI with deterministic machine-readable output.
+
+## Status Summary
+
+- Implemented command groups: `chain`, `balance`, `tx`, `contract`, `token`, `transfer`, `swap`, `lend`, `stake`, `yield`, `bridge`, `providers`, `schema`, `version`
+- Planned commands: documented in [Roadmap](/cli/roadmap)
+
+## Verification Source
+
+- `cli/internal/app/runner.go`
+- `cli/internal/app/runner_phase2.go`
+
+## Quick Start
+
+```bash
+go build -o mantle ./cli/cmd/mantle
+./mantle version
+./mantle schema --results-only
+./mantle chain info --results-only
+```
+
+## Documentation Sections
+
+- Learn:
+  - [Getting Started](/cli/getting-started)
+  - [Configuration](/cli/configuration)
+  - [Output Contract](/cli/output-contract)
+- Command reference:
+  - [Reference Index](/cli/reference/chain-balance-tx)
+- Futures:
+  - [Roadmap](/cli/roadmap)
