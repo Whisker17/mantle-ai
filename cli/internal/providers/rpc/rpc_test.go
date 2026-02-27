@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 type rpcReq struct {
@@ -106,5 +107,102 @@ func TestChainInfoDAReflectsEthereumBlobs(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(sepolia.DALayer), "blob") {
 		t.Fatalf("expected sepolia DA layer to mention blobs, got %q", sepolia.DALayer)
+	}
+}
+
+func TestGetTransactionFallsBackForUnsupportedTxType(t *testing.T) {
+	const (
+		txHash      = "0x1111111111111111111111111111111111111111111111111111111111111111"
+		blockHash   = "0x2222222222222222222222222222222222222222222222222222222222222222"
+		fromAddress = "0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001"
+		toAddress   = "0x4200000000000000000000000000000000000015"
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var req rpcReq
+		_ = json.NewDecoder(r.Body).Decode(&req)
+
+		var result any
+		switch req.Method {
+		case "eth_getTransactionByHash":
+			result = map[string]any{
+				"hash":      txHash,
+				"type":      "0x7e",
+				"from":      fromAddress,
+				"to":        toAddress,
+				"value":     "0x2386f26fc10000",
+				"gasPrice":  "0x0",
+				"input":     "0x1234",
+				"blockHash": blockHash,
+			}
+		case "eth_getTransactionReceipt":
+			result = map[string]any{
+				"transactionHash":   txHash,
+				"transactionIndex":  "0x0",
+				"blockHash":         blockHash,
+				"blockNumber":       "0x10",
+				"from":              fromAddress,
+				"to":                toAddress,
+				"cumulativeGasUsed": "0x5208",
+				"gasUsed":           "0x5208",
+				"effectiveGasPrice": "0x3b9aca00",
+				"logs":              []any{},
+				"logsBloom":         "0x" + strings.Repeat("0", 512),
+				"status":            "0x1",
+				"type":              "0x7e",
+			}
+		case "eth_getBlockByNumber":
+			result = map[string]any{
+				"timestamp": "0x65f15b80",
+			}
+		default:
+			result = "0x0"
+		}
+
+		_ = json.NewEncoder(w).Encode(rpcResp{JSONRPC: "2.0", ID: req.ID, Result: result})
+	}))
+	defer srv.Close()
+
+	provider, err := New(Config{Network: "mainnet", RPCURL: srv.URL})
+	if err != nil {
+		t.Fatalf("New provider failed: %v", err)
+	}
+	defer provider.Close()
+
+	info, err := provider.GetTransaction(context.Background(), txHash)
+	if err != nil {
+		t.Fatalf("GetTransaction failed: %v", err)
+	}
+	if info.Hash != txHash {
+		t.Fatalf("expected hash %s, got %s", txHash, info.Hash)
+	}
+	if info.From != fromAddress {
+		t.Fatalf("expected from %s, got %s", fromAddress, info.From)
+	}
+	if info.To != toAddress {
+		t.Fatalf("expected to %s, got %s", toAddress, info.To)
+	}
+	if info.Value.AmountBaseUnits != "10000000000000000" {
+		t.Fatalf("expected value 10000000000000000, got %s", info.Value.AmountBaseUnits)
+	}
+	if info.GasPrice != "1000000000" {
+		t.Fatalf("expected gas price 1000000000, got %s", info.GasPrice)
+	}
+	if info.GasUsed != "21000" {
+		t.Fatalf("expected gas used 21000, got %s", info.GasUsed)
+	}
+	if info.Status != "success" {
+		t.Fatalf("expected success status, got %s", info.Status)
+	}
+	if info.Input != "0x1234" {
+		t.Fatalf("expected input 0x1234, got %s", info.Input)
+	}
+	if info.BlockNumber != 16 {
+		t.Fatalf("expected block number 16, got %d", info.BlockNumber)
+	}
+	expectedTimestamp := time.Unix(1710316416, 0).UTC()
+	if !info.Timestamp.Equal(expectedTimestamp) {
+		t.Fatalf("expected timestamp %s, got %s", expectedTimestamp, info.Timestamp)
 	}
 }

@@ -392,6 +392,8 @@ func (s *runtimeState) fetchBestSwapQuote(ctx context.Context, req providers.Swa
 	if len(quotes) == 0 {
 		if firstErr == nil {
 			firstErr = clierr.New(clierr.CodeUnavailable, "no swap provider available")
+		} else if typedErr, ok := clierr.As(firstErr); ok && typedErr.Code == clierr.CodeUnsupported {
+			firstErr = clierr.New(clierr.CodeUnsupported, fmt.Sprintf("no swap quote providers configured for network %s", normalizeNetworkLabel(s.settings.Network)))
 		}
 		return nil, statuses, warnings, partial, firstErr
 	}
@@ -872,6 +874,14 @@ func compareAmountBaseUnits(left, right string) int {
 		return 1
 	}
 	return l.Cmp(r)
+}
+
+func normalizeNetworkLabel(network string) string {
+	norm := strings.ToLower(strings.TrimSpace(network))
+	if norm == "" {
+		return "mainnet"
+	}
+	return norm
 }
 
 func lendRatesToYield(protocol string, rates []model.LendRate) []model.YieldOpportunity {
