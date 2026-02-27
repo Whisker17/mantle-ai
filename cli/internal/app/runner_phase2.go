@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	clierr "github.com/mantle/mantle-ai/cli/internal/errors"
@@ -486,66 +487,75 @@ func (s *runtimeState) fetchYieldOpportunities(ctx context.Context, asset id.Ass
 		MinAPY: minAPY,
 		SortBy: sortBy,
 	}
+	collectors := []yieldCollector{}
 	if s.settings.Providers["pendle"].Enabled {
 		provider := pendle.New(pendle.Config{Timeout: s.settings.Timeout, Retries: s.settings.Retries})
-		start := time.Now()
-		data, err := provider.YieldOpportunities(ctx, req)
-		statuses = append(statuses, model.ProviderStatus{Name: "pendle", Status: statusFromErr(err), LatencyMS: time.Since(start).Milliseconds()})
-		if err != nil {
-			partial = true
-			warnings = append(warnings, fmt.Sprintf("pendle opportunities failed: %v", err))
-			if firstErr == nil {
-				firstErr = err
-			}
-		} else {
-			items = append(items, data...)
-		}
+		collectors = append(collectors, yieldCollector{
+			name: "pendle",
+			run: func(ctx context.Context) ([]model.YieldOpportunity, error) {
+				return provider.YieldOpportunities(ctx, req)
+			},
+			onErrFmt: "pendle opportunities failed: %v",
+		})
 	}
-
 	if s.settings.Providers["lendle"].Enabled {
 		provider := lendle.New(lendle.Config{Timeout: s.settings.Timeout, Retries: s.settings.Retries})
-		start := time.Now()
-		rates, err := provider.LendRates(ctx, asset)
-		statuses = append(statuses, model.ProviderStatus{Name: "lendle", Status: statusFromErr(err), LatencyMS: time.Since(start).Milliseconds()})
-		if err != nil {
-			partial = true
-			warnings = append(warnings, fmt.Sprintf("lendle rates failed: %v", err))
-			if firstErr == nil {
-				firstErr = err
-			}
-		} else {
-			items = append(items, lendRatesToYield("lendle", rates)...)
-		}
+		collectors = append(collectors, yieldCollector{
+			name: "lendle",
+			run: func(ctx context.Context) ([]model.YieldOpportunity, error) {
+				rates, err := provider.LendRates(ctx, asset)
+				if err != nil {
+					return nil, err
+				}
+				return lendRatesToYield("lendle", rates), nil
+			},
+			onErrFmt: "lendle rates failed: %v",
+		})
 	}
 	if s.settings.Providers["aurelius"].Enabled {
 		provider := aurelius.New(aurelius.Config{Timeout: s.settings.Timeout, Retries: s.settings.Retries})
-		start := time.Now()
-		rates, err := provider.LendRates(ctx, asset)
-		statuses = append(statuses, model.ProviderStatus{Name: "aurelius", Status: statusFromErr(err), LatencyMS: time.Since(start).Milliseconds()})
-		if err != nil {
-			partial = true
-			warnings = append(warnings, fmt.Sprintf("aurelius rates failed: %v", err))
-			if firstErr == nil {
-				firstErr = err
-			}
-		} else {
-			items = append(items, lendRatesToYield("aurelius", rates)...)
-		}
+		collectors = append(collectors, yieldCollector{
+			name: "aurelius",
+			run: func(ctx context.Context) ([]model.YieldOpportunity, error) {
+				rates, err := provider.LendRates(ctx, asset)
+				if err != nil {
+					return nil, err
+				}
+				return lendRatesToYield("aurelius", rates), nil
+			},
+			onErrFmt: "aurelius rates failed: %v",
+		})
 	}
 	if s.settings.Providers["aave_v3"].Enabled {
 		provider := aavev3.New(aavev3.Config{Network: s.settings.Network, RPCURL: s.settings.RPCURL})
-		start := time.Now()
-		rates, err := provider.LendRates(ctx, asset)
-		statuses = append(statuses, model.ProviderStatus{Name: "aave_v3", Status: statusFromErr(err), LatencyMS: time.Since(start).Milliseconds()})
-		if err != nil {
+		collectors = append(collectors, yieldCollector{
+			name: "aave_v3",
+			run: func(ctx context.Context) ([]model.YieldOpportunity, error) {
+				rates, err := provider.LendRates(ctx, asset)
+				if err != nil {
+					return nil, err
+				}
+				return lendRatesToYield("aave_v3", rates), nil
+			},
+			onErrFmt: "aave_v3 rates failed: %v",
+		})
+	}
+
+	for _, result := range runYieldCollectors(ctx, collectors) {
+		statuses = append(statuses, model.ProviderStatus{
+			Name:      result.name,
+			Status:    statusFromErr(result.err),
+			LatencyMS: result.latencyMS,
+		})
+		if result.err != nil {
 			partial = true
-			warnings = append(warnings, fmt.Sprintf("aave_v3 rates failed: %v", err))
+			warnings = append(warnings, fmt.Sprintf(result.onErrFmt, result.err))
 			if firstErr == nil {
-				firstErr = err
+				firstErr = result.err
 			}
-		} else {
-			items = append(items, lendRatesToYield("aave_v3", rates)...)
+			continue
 		}
+		items = append(items, result.items...)
 	}
 
 	filtered := make([]model.YieldOpportunity, 0, len(items))
@@ -569,6 +579,44 @@ func (s *runtimeState) fetchYieldOpportunities(ctx context.Context, asset id.Ass
 		return nil, statuses, warnings, partial, firstErr
 	}
 	return filtered, statuses, warnings, partial, nil
+}
+
+type yieldCollector struct {
+	name     string
+	run      func(context.Context) ([]model.YieldOpportunity, error)
+	onErrFmt string
+}
+
+type yieldCollectorResult struct {
+	name      string
+	items     []model.YieldOpportunity
+	err       error
+	latencyMS int64
+	onErrFmt  string
+}
+
+func runYieldCollectors(ctx context.Context, collectors []yieldCollector) []yieldCollectorResult {
+	results := make([]yieldCollectorResult, len(collectors))
+	var wg sync.WaitGroup
+	for i := range collectors {
+		idx := i
+		collector := collectors[i]
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			start := time.Now()
+			items, err := collector.run(ctx)
+			results[idx] = yieldCollectorResult{
+				name:      collector.name,
+				items:     items,
+				err:       err,
+				latencyMS: time.Since(start).Milliseconds(),
+				onErrFmt:  collector.onErrFmt,
+			}
+		}()
+	}
+	wg.Wait()
+	return results
 }
 
 func (s *runtimeState) fetchBridgeQuote(ctx context.Context, req providers.BridgeQuoteRequest, providerOpt string) (any, []model.ProviderStatus, []string, bool, error) {

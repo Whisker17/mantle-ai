@@ -2,11 +2,14 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mantle/mantle-ai/cli/internal/config"
+	"github.com/mantle/mantle-ai/cli/internal/model"
 )
 
 type schemaNode struct {
@@ -122,6 +125,51 @@ func TestLendingProviderEntriesAllIncludesAaveV3(t *testing.T) {
 	}
 	if len(entries) < 3 {
 		t.Fatalf("expected at least 3 entries, got %d (%v)", len(entries), names)
+	}
+}
+
+func TestRunYieldCollectorsFastSuccessNotBlockedBySlowFailure(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
+	defer cancel()
+
+	collectors := []yieldCollector{
+		{
+			name: "slow",
+			run: func(ctx context.Context) ([]model.YieldOpportunity, error) {
+				select {
+				case <-time.After(400 * time.Millisecond):
+					return []model.YieldOpportunity{{Protocol: "slow", Asset: "SLOW", APYTotal: 1}}, nil
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			},
+		},
+		{
+			name: "fast",
+			run: func(ctx context.Context) ([]model.YieldOpportunity, error) {
+				return []model.YieldOpportunity{{Protocol: "fast", Asset: "USDC", APYTotal: 2}}, nil
+			},
+		},
+	}
+
+	start := time.Now()
+	results := runYieldCollectors(ctx, collectors)
+	elapsed := time.Since(start)
+
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[0].err == nil {
+		t.Fatalf("expected slow collector to fail on timeout")
+	}
+	if results[1].err != nil {
+		t.Fatalf("expected fast collector to succeed, got err: %v", results[1].err)
+	}
+	if len(results[1].items) != 1 || results[1].items[0].Protocol != "fast" {
+		t.Fatalf("unexpected fast collector output: %+v", results[1].items)
+	}
+	if elapsed > 250*time.Millisecond {
+		t.Fatalf("expected parallel execution under timeout budget, elapsed=%s", elapsed)
 	}
 }
 
