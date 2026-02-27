@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	geth "github.com/ethereum/go-ethereum"
@@ -63,6 +66,7 @@ type Config struct {
 	Network            string
 	RPCURL             string
 	ProtocolDataSource string
+	ReserveOverrides   string
 }
 
 type Provider struct {
@@ -130,6 +134,7 @@ func (p *Provider) LendMarkets(ctx context.Context, asset id.Asset) ([]model.Len
 			BorrowAPY: reserve.borrowAPY,
 			TVLUSD:    0,
 			FetchedAt: now,
+			Source:    "onchain:aave-v3-protocol-data-provider",
 		})
 	}
 	if len(out) == 0 {
@@ -153,6 +158,7 @@ func (p *Provider) LendRates(ctx context.Context, asset id.Asset) ([]model.LendR
 			BorrowAPY:   reserve.borrowAPY,
 			Utilization: reserve.utilization,
 			FetchedAt:   now,
+			Source:      "onchain:aave-v3-protocol-data-provider",
 		})
 	}
 	if len(out) == 0 {
@@ -192,60 +198,46 @@ func (p *Provider) queryReserves(ctx context.Context, asset id.Asset) ([]reserve
 		return nil, err
 	}
 
-	targets := filterReserves(mantleMainnetReserves, asset)
+	targets, err := p.resolveReserves(asset)
+	if err != nil {
+		return nil, err
+	}
 	if len(targets) == 0 {
 		return nil, clierr.New(clierr.CodeUnavailable, "aave v3 has no reserves for requested asset")
 	}
 
+	type reserveQueryResult struct {
+		snapshot reserveSnapshot
+		ok       bool
+		err      error
+	}
+	queryResults := make([]reserveQueryResult, len(targets))
+	var wg sync.WaitGroup
+	for i := range targets {
+		idx := i
+		reserve := targets[i]
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			snapshot, ok, err := p.queryReserveSnapshot(ctx, client, dataProviderAddress, reserve)
+			queryResults[idx] = reserveQueryResult{
+				snapshot: snapshot,
+				ok:       ok,
+				err:      err,
+			}
+		}()
+	}
+	wg.Wait()
+
 	results := make([]reserveSnapshot, 0, len(targets))
 	var firstErr error
-	for _, reserve := range targets {
-		cfgOut, cfgErr := p.call(ctx, client, dataProviderAddress, "getReserveConfigurationData", reserve.Address)
-		if cfgErr != nil {
-			if firstErr == nil {
-				firstErr = cfgErr
-			}
-			continue
+	for _, result := range queryResults {
+		if result.err != nil && firstErr == nil {
+			firstErr = result.err
 		}
-		isActive, isFrozen, cfgParseErr := parseActiveFrozen(cfgOut)
-		if cfgParseErr != nil {
-			if firstErr == nil {
-				firstErr = cfgParseErr
-			}
-			continue
+		if result.ok {
+			results = append(results, result.snapshot)
 		}
-		if !isActive || isFrozen {
-			continue
-		}
-
-		dataOut, dataErr := p.call(ctx, client, dataProviderAddress, "getReserveData", reserve.Address)
-		if dataErr != nil {
-			if firstErr == nil {
-				firstErr = dataErr
-			}
-			continue
-		}
-		totalAToken, totalStableDebt, totalVariableDebt, liquidityRate, variableBorrowRate, parseErr := parseReserveData(dataOut)
-		if parseErr != nil {
-			if firstErr == nil {
-				firstErr = parseErr
-			}
-			continue
-		}
-
-		totalDebt := new(big.Int).Add(totalStableDebt, totalVariableDebt)
-		totalSupply := toDecimal(totalAToken, reserve.Decimals)
-		util := 0.0
-		if totalSupply > 0 {
-			util = toDecimal(totalDebt, reserve.Decimals) / totalSupply * 100
-		}
-
-		results = append(results, reserveSnapshot{
-			asset:       reserve,
-			supplyAPY:   rayToPercent(liquidityRate),
-			borrowAPY:   rayToPercent(variableBorrowRate),
-			utilization: util,
-		})
 	}
 
 	if len(results) == 0 {
@@ -255,6 +247,43 @@ func (p *Provider) queryReserves(ctx context.Context, asset id.Asset) ([]reserve
 		return nil, firstErr
 	}
 	return results, nil
+}
+
+func (p *Provider) queryReserveSnapshot(ctx context.Context, client *ethclient.Client, dataProviderAddress common.Address, reserve reserveConfig) (reserveSnapshot, bool, error) {
+	cfgOut, cfgErr := p.call(ctx, client, dataProviderAddress, "getReserveConfigurationData", reserve.Address)
+	if cfgErr != nil {
+		return reserveSnapshot{}, false, cfgErr
+	}
+	isActive, isFrozen, cfgParseErr := parseActiveFrozen(cfgOut)
+	if cfgParseErr != nil {
+		return reserveSnapshot{}, false, cfgParseErr
+	}
+	if !isActive || isFrozen {
+		return reserveSnapshot{}, false, nil
+	}
+
+	dataOut, dataErr := p.call(ctx, client, dataProviderAddress, "getReserveData", reserve.Address)
+	if dataErr != nil {
+		return reserveSnapshot{}, false, dataErr
+	}
+	totalAToken, totalStableDebt, totalVariableDebt, liquidityRate, variableBorrowRate, parseErr := parseReserveData(dataOut)
+	if parseErr != nil {
+		return reserveSnapshot{}, false, parseErr
+	}
+
+	totalDebt := new(big.Int).Add(totalStableDebt, totalVariableDebt)
+	totalSupply := toDecimal(totalAToken, reserve.Decimals)
+	util := 0.0
+	if totalSupply > 0 {
+		util = toDecimal(totalDebt, reserve.Decimals) / totalSupply * 100
+	}
+
+	return reserveSnapshot{
+		asset:       reserve,
+		supplyAPY:   rayToPercent(liquidityRate),
+		borrowAPY:   rayToPercent(variableBorrowRate),
+		utilization: util,
+	}, true, nil
 }
 
 func (p *Provider) protocolDataProviderAddress() (common.Address, error) {
@@ -332,6 +361,60 @@ func filterReserves(reserves []reserveConfig, asset id.Asset) []reserveConfig {
 		}
 	}
 	return out
+}
+
+func (p *Provider) resolveReserves(asset id.Asset) ([]reserveConfig, error) {
+	raw := strings.TrimSpace(p.cfg.ReserveOverrides)
+	if raw == "" {
+		raw = strings.TrimSpace(os.Getenv("MANTLE_AAVE_V3_RESERVES"))
+	}
+
+	reserves := mantleMainnetReserves
+	if raw != "" {
+		parsed, err := parseReserveOverrides(raw)
+		if err != nil {
+			return nil, err
+		}
+		if len(parsed) == 0 {
+			return nil, clierr.New(clierr.CodeUsage, "aave v3 reserve overrides resolved to empty set")
+		}
+		reserves = parsed
+	}
+	return filterReserves(reserves, asset), nil
+}
+
+func parseReserveOverrides(raw string) ([]reserveConfig, error) {
+	entries := strings.Split(raw, ",")
+	out := make([]reserveConfig, 0, len(entries))
+	for _, entry := range entries {
+		trimmed := strings.TrimSpace(entry)
+		if trimmed == "" {
+			continue
+		}
+		parts := strings.Split(trimmed, ":")
+		if len(parts) != 3 {
+			return nil, clierr.New(clierr.CodeUsage, "invalid aave v3 reserve override entry; expected SYMBOL:ADDRESS:DECIMALS")
+		}
+		symbol := strings.ToUpper(strings.TrimSpace(parts[0]))
+		address := strings.TrimSpace(parts[1])
+		decimalsRaw := strings.TrimSpace(parts[2])
+		if symbol == "" {
+			return nil, clierr.New(clierr.CodeUsage, "invalid aave v3 reserve override symbol")
+		}
+		if !common.IsHexAddress(address) {
+			return nil, clierr.New(clierr.CodeUsage, "invalid aave v3 reserve override address")
+		}
+		decimals, err := strconv.Atoi(decimalsRaw)
+		if err != nil || decimals < 0 || decimals > 36 {
+			return nil, clierr.New(clierr.CodeUsage, "invalid aave v3 reserve override decimals")
+		}
+		out = append(out, reserveConfig{
+			Symbol:   symbol,
+			Address:  common.HexToAddress(address),
+			Decimals: decimals,
+		})
+	}
+	return out, nil
 }
 
 func rayToPercent(ray *big.Int) float64 {

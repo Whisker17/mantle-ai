@@ -57,6 +57,18 @@ type ProviderCapabilityAuth struct {
 	Description string `json:"description,omitempty"`
 }
 
+type ProviderDoctorStatus struct {
+	Name          string `json:"name"`
+	Enabled       bool   `json:"enabled"`
+	Available     bool   `json:"available"`
+	Status        string `json:"status"`
+	LatencyMS     int64  `json:"latency_ms"`
+	LastSuccessAt string `json:"last_success_at,omitempty"`
+	LastFailureAt string `json:"last_failure_at,omitempty"`
+	FailureReason string `json:"failure_reason,omitempty"`
+	CheckedAt     string `json:"checked_at"`
+}
+
 type ChainInfo struct {
 	ChainID     int    `json:"chain_id"`
 	Name        string `json:"name"`
@@ -65,6 +77,7 @@ type ChainInfo struct {
 	ExplorerURL string `json:"explorer_url"`
 	BridgeURL   string `json:"bridge_url"`
 	DALayer     string `json:"da_layer"`
+	Source      string `json:"source,omitempty"`
 }
 
 type ChainStatus struct {
@@ -124,6 +137,21 @@ type CallSimulation struct {
 	Error       string `json:"error,omitempty"`
 }
 
+type TransferSimulation struct {
+	Kind         string     `json:"kind"`
+	From         string     `json:"from"`
+	To           string     `json:"to"`
+	Asset        string     `json:"asset"`
+	TokenAddress string     `json:"token_address,omitempty"`
+	Amount       AmountInfo `json:"amount"`
+	GasEstimate  string     `json:"gas_estimate"`
+	FeeMNT       string     `json:"fee_mnt"`
+	Success      bool       `json:"success"`
+	Error        string     `json:"error,omitempty"`
+	Source       string     `json:"source,omitempty"`
+	FetchedAt    string     `json:"fetched_at"`
+}
+
 type TokenInfo struct {
 	Address     string `json:"address"`
 	Name        string `json:"name"`
@@ -161,6 +189,7 @@ type LendMarket struct {
 	BorrowAPY float64 `json:"borrow_apy"`
 	TVLUSD    float64 `json:"tvl_usd"`
 	FetchedAt string  `json:"fetched_at"`
+	Source    string  `json:"source,omitempty"`
 }
 
 type LendRate struct {
@@ -170,6 +199,7 @@ type LendRate struct {
 	BorrowAPY   float64 `json:"borrow_apy"`
 	Utilization float64 `json:"utilization"`
 	FetchedAt   string  `json:"fetched_at"`
+	Source      string  `json:"source,omitempty"`
 }
 
 type StakeInfo struct {
@@ -181,6 +211,7 @@ type StakeInfo struct {
 	TotalMETH    string  `json:"total_meth"`
 	UnstakeDelay string  `json:"unstake_delay"`
 	FetchedAt    string  `json:"fetched_at"`
+	Source       string  `json:"source,omitempty"`
 }
 
 type StakeQuote struct {
@@ -203,6 +234,7 @@ type YieldOpportunity struct {
 	RiskLevel string  `json:"risk_level"`
 	Score     float64 `json:"score"`
 	FetchedAt string  `json:"fetched_at"`
+	Source    string  `json:"source,omitempty"`
 }
 
 type BridgeQuote struct {

@@ -8,6 +8,7 @@ Agent-first Mantle retrieval CLI.
 - [x] Address balances (MNT + known tokens)
 - [x] Transaction lookup
 - [x] Contract read and call simulation
+- [x] Transfer simulation (native + ERC-20)
 - [x] Token info, symbol resolution, token balances
 - [x] Swap quotes (Agni, Merchant Moe, best-of routing)
 - [x] Lending markets and rates (Lendle, Aurelius, AAVE v3)
@@ -15,6 +16,7 @@ Agent-first Mantle retrieval CLI.
 - [x] Yield opportunities (Pendle + lending aggregation)
 - [x] Bridge quotes and status (official bridge + Across quote support)
 - [x] Machine-readable command schema and providers metadata
+- [x] Provider diagnostics (`providers doctor`)
 
 ## Regression validation rules
 
@@ -37,11 +39,13 @@ go vet ./...
 ./mantle schema --results-only
 ./mantle chain info --results-only
 ./mantle chain status --results-only
+./mantle transfer simulate --from 0x1111111111111111111111111111111111111111 --to 0x2222222222222222222222222222222222222222 --asset MNT --amount 0.01 --results-only
 ./mantle swap quote --from USDC --to WMNT --amount 100 --provider best --results-only
 ./mantle lend markets --protocol all --results-only
 ./mantle stake info --results-only
 ./mantle yield opportunities --limit 10 --sort-by score --results-only
 ./mantle bridge quote --from-chain eip155:1 --to-chain eip155:5000 --asset USDC --amount 100 --provider best --results-only
+./mantle providers doctor --provider all --results-only
 ```
 
 ## Configuration

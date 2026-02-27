@@ -42,7 +42,7 @@ func TestRunnerSchemaIncludesPhase2CommandRoots(t *testing.T) {
 		t.Fatalf("failed to parse schema output: %v output=%s", err, stdout.String())
 	}
 
-	for _, cmd := range []string{"swap", "lend", "stake", "yield", "bridge"} {
+	for _, cmd := range []string{"transfer", "swap", "lend", "stake", "yield", "bridge"} {
 		if !schemaHasSubcommand(root, cmd) {
 			t.Fatalf("expected root schema to include %q subcommand", cmd)
 		}
@@ -68,6 +68,48 @@ func TestRunnerSchemaSwapQuoteFlags(t *testing.T) {
 		if !schemaHasFlag(node, flag) {
 			t.Fatalf("expected swap quote schema to include flag %q", flag)
 		}
+	}
+}
+
+func TestRunnerSchemaTransferSimulateFlags(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	r := NewRunnerWithWriters(&stdout, &stderr)
+
+	code := r.Run([]string{"schema", "transfer simulate", "--results-only"})
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d stderr=%s", code, stderr.String())
+	}
+
+	var node schemaNode
+	if err := json.Unmarshal(stdout.Bytes(), &node); err != nil {
+		t.Fatalf("failed to parse schema output: %v output=%s", err, stdout.String())
+	}
+
+	for _, flag := range []string{"from", "to", "asset", "amount"} {
+		if !schemaHasFlag(node, flag) {
+			t.Fatalf("expected transfer simulate schema to include flag %q", flag)
+		}
+	}
+}
+
+func TestRunnerSchemaProvidersDoctorFlags(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	r := NewRunnerWithWriters(&stdout, &stderr)
+
+	code := r.Run([]string{"schema", "providers doctor", "--results-only"})
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d stderr=%s", code, stderr.String())
+	}
+
+	var node schemaNode
+	if err := json.Unmarshal(stdout.Bytes(), &node); err != nil {
+		t.Fatalf("failed to parse schema output: %v output=%s", err, stdout.String())
+	}
+
+	if !schemaHasFlag(node, "provider") {
+		t.Fatalf("expected providers doctor schema to include flag %q", "provider")
 	}
 }
 
@@ -157,6 +199,51 @@ func TestRunYieldCollectorsFastSuccessNotBlockedBySlowFailure(t *testing.T) {
 
 	start := time.Now()
 	results := runYieldCollectors(ctx, collectors)
+	elapsed := time.Since(start)
+
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[0].err == nil {
+		t.Fatalf("expected slow collector to fail on timeout")
+	}
+	if results[1].err != nil {
+		t.Fatalf("expected fast collector to succeed, got err: %v", results[1].err)
+	}
+	if len(results[1].items) != 1 || results[1].items[0].Protocol != "fast" {
+		t.Fatalf("unexpected fast collector output: %+v", results[1].items)
+	}
+	if elapsed > 250*time.Millisecond {
+		t.Fatalf("expected parallel execution under timeout budget, elapsed=%s", elapsed)
+	}
+}
+
+func TestRunParallelCollectorsLendRatesFastSuccessNotBlockedBySlowFailure(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
+	defer cancel()
+
+	tasks := []collectTask[model.LendRate]{
+		{
+			name: "slow",
+			run: func(ctx context.Context) ([]model.LendRate, error) {
+				select {
+				case <-time.After(400 * time.Millisecond):
+					return []model.LendRate{{Protocol: "slow", Asset: "SLOW", SupplyAPY: 1}}, nil
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			},
+		},
+		{
+			name: "fast",
+			run: func(ctx context.Context) ([]model.LendRate, error) {
+				return []model.LendRate{{Protocol: "fast", Asset: "USDC", SupplyAPY: 2}}, nil
+			},
+		},
+	}
+
+	start := time.Now()
+	results := runParallelCollectors(ctx, tasks)
 	elapsed := time.Since(start)
 
 	if len(results) != 2 {

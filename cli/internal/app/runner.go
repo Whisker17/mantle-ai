@@ -162,6 +162,7 @@ func (s *runtimeState) newRootCommand() *cobra.Command {
 	cmd.AddCommand(s.newTransactionCommand())
 	cmd.AddCommand(s.newContractCommand())
 	cmd.AddCommand(s.newTokenCommand())
+	cmd.AddCommand(s.newTransferCommand())
 	cmd.AddCommand(s.newSwapCommand())
 	cmd.AddCommand(s.newLendCommand())
 	cmd.AddCommand(s.newStakeCommand())
@@ -219,6 +220,7 @@ func (s *runtimeState) newProvidersCommand() *cobra.Command {
 		},
 	}
 	root.AddCommand(list)
+	root.AddCommand(s.newProvidersDoctorCommand())
 	return root
 }
 
@@ -729,6 +731,7 @@ func shouldInitProvider(commandPath string) bool {
 		strings.HasPrefix(norm, "balance") ||
 		strings.HasPrefix(norm, "tx") ||
 		strings.HasPrefix(norm, "contract") ||
+		strings.HasPrefix(norm, "transfer") ||
 		strings.HasPrefix(norm, "token")
 }
 

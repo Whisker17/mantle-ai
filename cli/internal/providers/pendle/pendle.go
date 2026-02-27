@@ -70,6 +70,7 @@ func (p *Provider) YieldOpportunities(ctx context.Context, req providers.YieldRe
 			RiskLevel: riskFromAPY(total),
 			Score:     score(total, pool.TVLUSD),
 			FetchedAt: now,
+			Source:    "defillama:/pools project=pendle chain=mantle",
 		}
 		out = append(out, item)
 	}
