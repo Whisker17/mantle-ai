@@ -572,6 +572,7 @@ func chainInfoByNetwork(network, rpcURL string) (model.ChainInfo, error) {
 			ExplorerURL: "https://explorer.mantle.xyz",
 			BridgeURL:   "https://bridge.mantle.xyz",
 			DALayer:     "Ethereum blobs",
+			Source:      "mantle chain registry + configured rpc endpoint",
 		}, nil
 	case "sepolia":
 		return model.ChainInfo{
@@ -582,6 +583,7 @@ func chainInfoByNetwork(network, rpcURL string) (model.ChainInfo, error) {
 			ExplorerURL: "https://explorer.sepolia.mantle.xyz",
 			BridgeURL:   "https://bridge.sepolia.mantle.xyz",
 			DALayer:     "Ethereum blobs",
+			Source:      "mantle chain registry + configured rpc endpoint",
 		}, nil
 	default:
 		return model.ChainInfo{}, clierr.New(clierr.CodeUsage, fmt.Sprintf("unsupported network: %s", network))

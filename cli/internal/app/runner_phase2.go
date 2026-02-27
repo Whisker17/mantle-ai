@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"regexp"
@@ -18,15 +19,500 @@ import (
 	"github.com/mantle/mantle-ai/cli/internal/providers/across"
 	"github.com/mantle/mantle-ai/cli/internal/providers/agni"
 	"github.com/mantle/mantle-ai/cli/internal/providers/aurelius"
+	"github.com/mantle/mantle-ai/cli/internal/providers/defillama"
 	"github.com/mantle/mantle-ai/cli/internal/providers/lendle"
 	"github.com/mantle/mantle-ai/cli/internal/providers/mantlebridge"
 	"github.com/mantle/mantle-ai/cli/internal/providers/merchantmoe"
 	"github.com/mantle/mantle-ai/cli/internal/providers/meth"
 	"github.com/mantle/mantle-ai/cli/internal/providers/pendle"
+	"github.com/mantle/mantle-ai/cli/internal/providers/rpc"
 	"github.com/spf13/cobra"
 )
 
 var hexAddressPattern = regexp.MustCompile(`^0x[0-9a-fA-F]{40}$`)
+var nativeAssetPattern = regexp.MustCompile(`^(?i:eth|mnt)$`)
+
+const (
+	providersDoctorHistoryKey = "providers_doctor_history_v1"
+	providersDoctorHistoryTTL = 365 * 24 * time.Hour
+)
+
+type providersDoctorHistory struct {
+	Entries map[string]providersDoctorHistoryEntry `json:"entries"`
+}
+
+type providersDoctorHistoryEntry struct {
+	LastSuccessAt string `json:"last_success_at,omitempty"`
+	LastFailureAt string `json:"last_failure_at,omitempty"`
+	FailureReason string `json:"failure_reason,omitempty"`
+}
+
+func (s *runtimeState) newTransferCommand() *cobra.Command {
+	var from string
+	var to string
+	var asset string
+	var amount string
+
+	root := &cobra.Command{Use: "transfer", Short: "Transfer simulation commands"}
+	simulate := &cobra.Command{
+		Use:   "simulate",
+		Short: "Simulate native or ERC-20 transfer and estimate gas",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fromAddr := strings.TrimSpace(from)
+			toAddr := strings.TrimSpace(to)
+			assetInput := strings.TrimSpace(asset)
+			amountInput := strings.TrimSpace(amount)
+
+			if !hexAddressPattern.MatchString(fromAddr) {
+				return clierr.New(clierr.CodeUsage, "invalid from address")
+			}
+			if !hexAddressPattern.MatchString(toAddr) {
+				return clierr.New(clierr.CodeUsage, "invalid to address")
+			}
+			if amountInput == "" {
+				return clierr.New(clierr.CodeUsage, "amount is required")
+			}
+			if assetInput == "" {
+				assetInput = "MNT"
+			}
+
+			key := cacheKey("transfer simulate", map[string]any{
+				"network": s.settings.Network,
+				"from":    strings.ToLower(fromAddr),
+				"to":      strings.ToLower(toAddr),
+				"asset":   strings.ToLower(assetInput),
+				"amount":  amountInput,
+			})
+			return s.runCachedCommand(trimRootPath(cmd.CommandPath()), key, 30*time.Second, func(ctx context.Context) (any, []model.ProviderStatus, []string, bool, error) {
+				return s.fetchTransferSimulation(ctx, fromAddr, toAddr, assetInput, amountInput)
+			})
+		},
+	}
+	simulate.Flags().StringVar(&from, "from", "", "Sender address")
+	simulate.Flags().StringVar(&to, "to", "", "Recipient address")
+	simulate.Flags().StringVar(&asset, "asset", "MNT", "Asset symbol/address/CAIP-19 (MNT for native transfer)")
+	simulate.Flags().StringVar(&amount, "amount", "", "Amount in decimal units")
+	_ = simulate.MarkFlagRequired("from")
+	_ = simulate.MarkFlagRequired("to")
+	_ = simulate.MarkFlagRequired("amount")
+
+	root.AddCommand(simulate)
+	return root
+}
+
+func (s *runtimeState) fetchTransferSimulation(ctx context.Context, from, to, assetInput, amountInput string) (any, []model.ProviderStatus, []string, bool, error) {
+	start := time.Now()
+	if nativeAssetPattern.MatchString(strings.TrimSpace(assetInput)) {
+		status, err := s.chainProvider.ChainStatus(ctx)
+		providerStatus := []model.ProviderStatus{{
+			Name:      "rpc",
+			Status:    statusFromErr(err),
+			LatencyMS: time.Since(start).Milliseconds(),
+		}}
+		if err != nil {
+			return nil, providerStatus, nil, false, err
+		}
+		baseUnits, amountDecimal, err := id.NormalizeAmount("", amountInput, 18)
+		if err != nil {
+			return nil, providerStatus, nil, false, err
+		}
+		gasPrice, ok := new(big.Int).SetString(strings.TrimSpace(status.GasPrice), 10)
+		if !ok {
+			return nil, providerStatus, nil, false, clierr.New(clierr.CodeUnavailable, "invalid gas price returned by rpc")
+		}
+		gasEstimate := big.NewInt(21000)
+		feeWei := new(big.Int).Mul(gasEstimate, gasPrice)
+		return model.TransferSimulation{
+			Kind:  "native",
+			From:  strings.ToLower(from),
+			To:    strings.ToLower(to),
+			Asset: "MNT",
+			Amount: model.AmountInfo{
+				AmountBaseUnits: baseUnits,
+				AmountDecimal:   amountDecimal,
+				Decimals:        18,
+			},
+			GasEstimate: gasEstimate.String(),
+			FeeMNT:      id.FormatDecimalCompat(feeWei.String(), 18),
+			Success:     true,
+			Source:      "intrinsic:native-transfer + rpc chain.status",
+			FetchedAt:   time.Now().UTC().Format(time.RFC3339),
+		}, providerStatus, nil, false, nil
+	}
+
+	chain, err := id.ParseChain(s.settings.Network)
+	if err != nil {
+		return nil, nil, nil, false, err
+	}
+	asset, err := id.ParseAsset(assetInput, chain)
+	if err != nil {
+		return nil, nil, nil, false, err
+	}
+	baseUnits, amountDecimal, err := id.NormalizeAmount("", amountInput, asset.Decimals)
+	if err != nil {
+		return nil, nil, nil, false, err
+	}
+	call, err := s.chainProvider.SimulateCall(ctx, providers.ContractCallRequest{
+		From:     from,
+		To:       asset.Address,
+		Function: "transfer(address,uint256)",
+		Args:     []string{to, baseUnits},
+		Value:    "",
+	})
+	providerStatus := []model.ProviderStatus{{
+		Name:      "rpc",
+		Status:    statusFromErr(err),
+		LatencyMS: time.Since(start).Milliseconds(),
+	}}
+	if err != nil {
+		return nil, providerStatus, nil, false, err
+	}
+	return model.TransferSimulation{
+		Kind:         "erc20",
+		From:         strings.ToLower(from),
+		To:           strings.ToLower(to),
+		Asset:        asset.Symbol,
+		TokenAddress: asset.Address,
+		Amount: model.AmountInfo{
+			AmountBaseUnits: baseUnits,
+			AmountDecimal:   amountDecimal,
+			Decimals:        asset.Decimals,
+		},
+		GasEstimate: call.GasEstimate,
+		FeeMNT:      call.FeeMNT,
+		Success:     call.Success,
+		Error:       call.Error,
+		Source:      "onchain:eth_estimateGas+eth_call erc20.transfer",
+		FetchedAt:   time.Now().UTC().Format(time.RFC3339),
+	}, providerStatus, nil, false, nil
+}
+
+func (s *runtimeState) newProvidersDoctorCommand() *cobra.Command {
+	var provider string
+
+	cmd := &cobra.Command{
+		Use:   "doctor",
+		Short: "Run provider diagnostics (availability, latency, last success/failure)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, cancel := context.WithTimeout(context.Background(), s.settings.Timeout)
+			defer cancel()
+
+			data, providerStatus, warnings, partial, err := s.runProvidersDoctor(ctx, provider)
+			if err != nil {
+				s.captureCommandDiagnostics(warnings, providerStatus, partial)
+				return err
+			}
+			s.captureCommandDiagnostics(warnings, providerStatus, partial)
+			return s.emitSuccess(trimRootPath(cmd.CommandPath()), data, warnings, cacheMetaBypass(), providerStatus, partial)
+		},
+	}
+	cmd.Flags().StringVar(&provider, "provider", "all", "Provider name or all")
+	return cmd
+}
+
+func (s *runtimeState) runProvidersDoctor(ctx context.Context, providerOpt string) ([]model.ProviderDoctorStatus, []model.ProviderStatus, []string, bool, error) {
+	selected := strings.ToLower(strings.TrimSpace(providerOpt))
+	if selected == "" {
+		selected = "all"
+	}
+
+	checks, err := s.providerDoctorChecks(selected)
+	if err != nil {
+		return nil, nil, nil, false, err
+	}
+
+	history := s.loadProvidersDoctorHistory()
+	results := make([]model.ProviderDoctorStatus, 0, len(checks))
+	providerStatus := make([]model.ProviderStatus, 0, len(checks))
+	warnings := []string{}
+	partial := false
+
+	tasks := make([]collectTask[model.ProviderDoctorStatus], 0, len(checks))
+	for _, check := range checks {
+		current := check
+		if !current.enabled {
+			checkedAt := time.Now().UTC().Format(time.RFC3339)
+			entry := history.Entries[current.name]
+			status := model.ProviderDoctorStatus{
+				Name:          current.name,
+				Enabled:       false,
+				Available:     false,
+				Status:        "disabled",
+				LatencyMS:     0,
+				LastSuccessAt: entry.LastSuccessAt,
+				LastFailureAt: entry.LastFailureAt,
+				FailureReason: entry.FailureReason,
+				CheckedAt:     checkedAt,
+			}
+			results = append(results, status)
+			providerStatus = append(providerStatus, model.ProviderStatus{Name: current.name, Status: "error", LatencyMS: 0})
+			continue
+		}
+		tasks = append(tasks, collectTask[model.ProviderDoctorStatus]{
+			name: current.name,
+			run: func(ctx context.Context) ([]model.ProviderDoctorStatus, error) {
+				start := time.Now()
+				err := current.run(ctx)
+				statusLabel, available, reason := providerDoctorOutcome(err)
+				checkedAt := time.Now().UTC().Format(time.RFC3339)
+				entry := history.Entries[current.name]
+
+				return []model.ProviderDoctorStatus{{
+					Name:          current.name,
+					Enabled:       true,
+					Available:     available,
+					Status:        statusLabel,
+					LatencyMS:     time.Since(start).Milliseconds(),
+					LastSuccessAt: entry.LastSuccessAt,
+					LastFailureAt: entry.LastFailureAt,
+					FailureReason: reason,
+					CheckedAt:     checkedAt,
+				}}, err
+			},
+		})
+	}
+
+	for _, taskResult := range runParallelCollectors(ctx, tasks) {
+		if len(taskResult.items) == 0 {
+			continue
+		}
+		item := taskResult.items[0]
+		entry := history.Entries[item.Name]
+		if item.Available {
+			entry.LastSuccessAt = item.CheckedAt
+		} else {
+			entry.LastFailureAt = item.CheckedAt
+			entry.FailureReason = item.FailureReason
+		}
+		item.LastSuccessAt = entry.LastSuccessAt
+		item.LastFailureAt = entry.LastFailureAt
+		item.FailureReason = entry.FailureReason
+		history.Entries[item.Name] = entry
+
+		results = append(results, item)
+		providerStatus = append(providerStatus, model.ProviderStatus{
+			Name:      taskResult.name,
+			Status:    item.Status,
+			LatencyMS: item.LatencyMS,
+		})
+		if taskResult.err != nil {
+			partial = true
+			warnings = append(warnings, fmt.Sprintf("%s health check failed: %v", taskResult.name, taskResult.err))
+		}
+	}
+
+	sort.SliceStable(results, func(i, j int) bool {
+		return results[i].Name < results[j].Name
+	})
+	sort.SliceStable(providerStatus, func(i, j int) bool {
+		return providerStatus[i].Name < providerStatus[j].Name
+	})
+	s.saveProvidersDoctorHistory(history)
+	return results, providerStatus, warnings, partial, nil
+}
+
+type providerDoctorCheck struct {
+	name    string
+	enabled bool
+	run     func(context.Context) error
+}
+
+func (s *runtimeState) providerDoctorChecks(selected string) ([]providerDoctorCheck, error) {
+	all := []string{"rpc", "agni", "merchant_moe", "lendle", "aurelius", "aave_v3", "meth", "mantle_bridge", "across", "pendle", "defillama"}
+	valid := map[string]bool{}
+	for _, name := range all {
+		valid[name] = true
+	}
+	if selected != "all" && !valid[selected] {
+		return nil, clierr.New(clierr.CodeUsage, "provider must be one of: all,rpc,agni,merchant_moe,lendle,aurelius,aave_v3,meth,mantle_bridge,across,pendle,defillama")
+	}
+
+	fromChain, _ := id.ParseChain("eip155:1")
+	toChain, _ := id.ParseChain(defaultMantleChainID(s.settings.Network))
+	bridgeAsset, _ := parseBridgeAsset("USDC", toChain)
+	bridgeReq := providers.BridgeQuoteRequest{
+		FromChain:     fromChain,
+		ToChain:       toChain,
+		Asset:         bridgeAsset,
+		AmountDecimal: "1",
+	}
+
+	items := []providerDoctorCheck{
+		{
+			name:    "rpc",
+			enabled: s.settings.Providers["rpc"].Enabled,
+			run: func(ctx context.Context) error {
+				provider, err := rpc.New(rpc.Config{Network: s.settings.Network, RPCURL: s.settings.RPCURL})
+				if err != nil {
+					return err
+				}
+				defer provider.Close()
+				_, err = provider.ChainStatus(ctx)
+				return err
+			},
+		},
+		{
+			name:    "agni",
+			enabled: s.settings.Providers["agni"].Enabled,
+			run: func(ctx context.Context) error {
+				provider, err := s.newAgniProvider()
+				if err != nil {
+					return err
+				}
+				closeIfPossible(provider)
+				return nil
+			},
+		},
+		{
+			name:    "merchant_moe",
+			enabled: s.settings.Providers["merchant_moe"].Enabled,
+			run: func(ctx context.Context) error {
+				provider, err := s.newMerchantMoeProvider()
+				if err != nil {
+					return err
+				}
+				closeIfPossible(provider)
+				return nil
+			},
+		},
+		{
+			name:    "lendle",
+			enabled: s.settings.Providers["lendle"].Enabled,
+			run: func(ctx context.Context) error {
+				provider := lendle.New(lendle.Config{Timeout: s.settings.Timeout, Retries: s.settings.Retries})
+				_, err := provider.LendRates(ctx, id.Asset{})
+				return err
+			},
+		},
+		{
+			name:    "aurelius",
+			enabled: s.settings.Providers["aurelius"].Enabled,
+			run: func(ctx context.Context) error {
+				provider := aurelius.New(aurelius.Config{Timeout: s.settings.Timeout, Retries: s.settings.Retries})
+				_, err := provider.LendRates(ctx, id.Asset{})
+				return err
+			},
+		},
+		{
+			name:    "aave_v3",
+			enabled: s.settings.Providers["aave_v3"].Enabled,
+			run: func(ctx context.Context) error {
+				provider := aavev3.New(aavev3.Config{Network: s.settings.Network, RPCURL: s.settings.RPCURL})
+				_, err := provider.LendRates(ctx, id.Asset{Symbol: "USDC"})
+				return err
+			},
+		},
+		{
+			name:    "meth",
+			enabled: s.settings.Providers["meth"].Enabled,
+			run: func(ctx context.Context) error {
+				provider, err := s.newStakingProvider()
+				if err != nil {
+					return err
+				}
+				_, err = provider.StakeInfo(ctx)
+				return err
+			},
+		},
+		{
+			name:    "mantle_bridge",
+			enabled: s.settings.Providers["mantle_bridge"].Enabled,
+			run: func(ctx context.Context) error {
+				provider := mantlebridge.New(mantlebridge.Config{Network: s.settings.Network})
+				_, err := provider.QuoteBridge(ctx, bridgeReq)
+				return err
+			},
+		},
+		{
+			name:    "across",
+			enabled: s.settings.Providers["across"].Enabled,
+			run: func(ctx context.Context) error {
+				provider := s.newAcrossProvider()
+				_, err := provider.QuoteBridge(ctx, bridgeReq)
+				return err
+			},
+		},
+		{
+			name:    "pendle",
+			enabled: s.settings.Providers["pendle"].Enabled,
+			run: func(ctx context.Context) error {
+				provider := pendle.New(pendle.Config{Timeout: s.settings.Timeout, Retries: s.settings.Retries})
+				_, err := provider.YieldOpportunities(ctx, providers.YieldRequest{Limit: 1})
+				return err
+			},
+		},
+		{
+			name:    "defillama",
+			enabled: s.settings.Providers["defillama"].Enabled,
+			run: func(ctx context.Context) error {
+				provider := defillama.New(defillama.Config{Timeout: s.settings.Timeout, Retries: s.settings.Retries})
+				_, err := provider.FetchPools(ctx)
+				return err
+			},
+		},
+	}
+
+	if selected == "all" {
+		return items, nil
+	}
+	for _, item := range items {
+		if item.name == selected {
+			return []providerDoctorCheck{item}, nil
+		}
+	}
+	return nil, clierr.New(clierr.CodeUsage, "provider not found")
+}
+
+func providerDoctorOutcome(err error) (status string, available bool, reason string) {
+	if err == nil {
+		return "ok", true, ""
+	}
+	reason = err.Error()
+	if typed, ok := clierr.As(err); ok {
+		switch typed.Code {
+		case clierr.CodeAuth:
+			return "auth_error", false, reason
+		case clierr.CodeRateLimited:
+			return "rate_limited", false, reason
+		case clierr.CodeUnavailable:
+			return "unavailable", false, reason
+		case clierr.CodeUnsupported:
+			return "unsupported", false, reason
+		case clierr.CodeUsage:
+			return "usage_error", false, reason
+		}
+	}
+	return "error", false, reason
+}
+
+func (s *runtimeState) loadProvidersDoctorHistory() providersDoctorHistory {
+	history := providersDoctorHistory{Entries: map[string]providersDoctorHistoryEntry{}}
+	if s.cache == nil {
+		return history
+	}
+	res, err := s.cache.Get(providersDoctorHistoryKey, -1)
+	if err != nil || !res.Hit {
+		return history
+	}
+	if err := json.Unmarshal(res.Value, &history); err != nil {
+		return providersDoctorHistory{Entries: map[string]providersDoctorHistoryEntry{}}
+	}
+	if history.Entries == nil {
+		history.Entries = map[string]providersDoctorHistoryEntry{}
+	}
+	return history
+}
+
+func (s *runtimeState) saveProvidersDoctorHistory(history providersDoctorHistory) {
+	if s.cache == nil {
+		return
+	}
+	payload, err := json.Marshal(history)
+	if err != nil {
+		return
+	}
+	_ = s.cache.Set(providersDoctorHistoryKey, payload, providersDoctorHistoryTTL)
+}
 
 func (s *runtimeState) newSwapCommand() *cobra.Command {
 	var from string
@@ -417,19 +903,28 @@ func (s *runtimeState) fetchLendMarkets(ctx context.Context, protocol string, as
 	partial := false
 	var firstErr error
 
+	tasks := make([]collectTask[model.LendMarket], 0, len(entries))
 	for _, entry := range entries {
-		start := time.Now()
-		data, fetchErr := entry.provider.LendMarkets(ctx, asset)
-		statuses = append(statuses, model.ProviderStatus{Name: entry.name, Status: statusFromErr(fetchErr), LatencyMS: time.Since(start).Milliseconds()})
-		if fetchErr != nil {
+		current := entry
+		tasks = append(tasks, collectTask[model.LendMarket]{
+			name: current.name,
+			run: func(ctx context.Context) ([]model.LendMarket, error) {
+				return current.provider.LendMarkets(ctx, asset)
+			},
+		})
+	}
+
+	for _, result := range runParallelCollectors(ctx, tasks) {
+		statuses = append(statuses, model.ProviderStatus{Name: result.name, Status: statusFromErr(result.err), LatencyMS: result.latencyMS})
+		if result.err != nil {
 			partial = true
-			warnings = append(warnings, fmt.Sprintf("%s markets failed: %v", entry.name, fetchErr))
+			warnings = append(warnings, fmt.Sprintf("%s markets failed: %v", result.name, result.err))
 			if firstErr == nil {
-				firstErr = fetchErr
+				firstErr = result.err
 			}
 			continue
 		}
-		items = append(items, data...)
+		items = append(items, result.items...)
 	}
 	sort.SliceStable(items, func(i, j int) bool { return items[i].TVLUSD > items[j].TVLUSD })
 	if len(items) == 0 {
@@ -452,19 +947,28 @@ func (s *runtimeState) fetchLendRates(ctx context.Context, protocol string, asse
 	partial := false
 	var firstErr error
 
+	tasks := make([]collectTask[model.LendRate], 0, len(entries))
 	for _, entry := range entries {
-		start := time.Now()
-		data, fetchErr := entry.provider.LendRates(ctx, asset)
-		statuses = append(statuses, model.ProviderStatus{Name: entry.name, Status: statusFromErr(fetchErr), LatencyMS: time.Since(start).Milliseconds()})
-		if fetchErr != nil {
+		current := entry
+		tasks = append(tasks, collectTask[model.LendRate]{
+			name: current.name,
+			run: func(ctx context.Context) ([]model.LendRate, error) {
+				return current.provider.LendRates(ctx, asset)
+			},
+		})
+	}
+
+	for _, result := range runParallelCollectors(ctx, tasks) {
+		statuses = append(statuses, model.ProviderStatus{Name: result.name, Status: statusFromErr(result.err), LatencyMS: result.latencyMS})
+		if result.err != nil {
 			partial = true
-			warnings = append(warnings, fmt.Sprintf("%s rates failed: %v", entry.name, fetchErr))
+			warnings = append(warnings, fmt.Sprintf("%s rates failed: %v", result.name, result.err))
 			if firstErr == nil {
-				firstErr = fetchErr
+				firstErr = result.err
 			}
 			continue
 		}
-		items = append(items, data...)
+		items = append(items, result.items...)
 	}
 	sort.SliceStable(items, func(i, j int) bool { return items[i].SupplyAPY > items[j].SupplyAPY })
 	if len(items) == 0 {
@@ -598,22 +1102,59 @@ type yieldCollectorResult struct {
 }
 
 func runYieldCollectors(ctx context.Context, collectors []yieldCollector) []yieldCollectorResult {
-	results := make([]yieldCollectorResult, len(collectors))
+	wrapped := make([]collectTask[model.YieldOpportunity], 0, len(collectors))
+	for _, collector := range collectors {
+		wrapped = append(wrapped, collectTask[model.YieldOpportunity]{
+			name:     collector.name,
+			run:      collector.run,
+			onErrFmt: collector.onErrFmt,
+		})
+	}
+	genericResults := runParallelCollectors(ctx, wrapped)
+	results := make([]yieldCollectorResult, len(genericResults))
+	for i, result := range genericResults {
+		results[i] = yieldCollectorResult{
+			name:      result.name,
+			items:     result.items,
+			err:       result.err,
+			latencyMS: result.latencyMS,
+			onErrFmt:  result.onErrFmt,
+		}
+	}
+	return results
+}
+
+type collectTask[T any] struct {
+	name     string
+	run      func(context.Context) ([]T, error)
+	onErrFmt string
+}
+
+type collectResult[T any] struct {
+	name      string
+	items     []T
+	err       error
+	latencyMS int64
+	onErrFmt  string
+}
+
+func runParallelCollectors[T any](ctx context.Context, tasks []collectTask[T]) []collectResult[T] {
+	results := make([]collectResult[T], len(tasks))
 	var wg sync.WaitGroup
-	for i := range collectors {
+	for i := range tasks {
 		idx := i
-		collector := collectors[i]
+		task := tasks[i]
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			start := time.Now()
-			items, err := collector.run(ctx)
-			results[idx] = yieldCollectorResult{
-				name:      collector.name,
+			items, err := task.run(ctx)
+			results[idx] = collectResult[T]{
+				name:      task.name,
 				items:     items,
 				err:       err,
 				latencyMS: time.Since(start).Milliseconds(),
-				onErrFmt:  collector.onErrFmt,
+				onErrFmt:  task.onErrFmt,
 			}
 		}()
 	}
@@ -899,6 +1440,7 @@ func lendRatesToYield(protocol string, rates []model.LendRate) []model.YieldOppo
 			RiskLevel: riskFromAPY(apy),
 			Score:     score(apy, 0),
 			FetchedAt: rate.FetchedAt,
+			Source:    rate.Source,
 		})
 	}
 	return items

@@ -100,6 +100,9 @@ func TestChainInfoDAReflectsEthereumBlobs(t *testing.T) {
 	if !strings.Contains(strings.ToLower(mainnet.DALayer), "blob") {
 		t.Fatalf("expected mainnet DA layer to mention blobs, got %q", mainnet.DALayer)
 	}
+	if strings.TrimSpace(mainnet.Source) == "" {
+		t.Fatalf("expected mainnet source to be set, got %q", mainnet.Source)
+	}
 
 	sepolia, err := chainInfoByNetwork("sepolia", "https://example-rpc")
 	if err != nil {
@@ -107,6 +110,9 @@ func TestChainInfoDAReflectsEthereumBlobs(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(sepolia.DALayer), "blob") {
 		t.Fatalf("expected sepolia DA layer to mention blobs, got %q", sepolia.DALayer)
+	}
+	if strings.TrimSpace(sepolia.Source) == "" {
+		t.Fatalf("expected sepolia source to be set, got %q", sepolia.Source)
 	}
 }
 

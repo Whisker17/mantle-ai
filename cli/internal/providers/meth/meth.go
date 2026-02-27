@@ -139,6 +139,7 @@ func (p *Provider) StakeInfo(ctx context.Context) (model.StakeInfo, error) {
 		TotalMETH:    id.FormatDecimalCompat(totalMETH.String(), 18),
 		UnstakeDelay: "~7d",
 		FetchedAt:    time.Now().UTC().Format(time.RFC3339),
+		Source:       "onchain:mETH staking contract + defillama:/pools",
 	}, nil
 }
 

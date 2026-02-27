@@ -67,6 +67,7 @@ func (p *Provider) LendMarkets(ctx context.Context, asset id.Asset) ([]model.Len
 			BorrowAPY: borrow,
 			TVLUSD:    pool.TVLUSD,
 			FetchedAt: now,
+			Source:    "defillama:/pools project=lendle chain=mantle",
 		})
 	}
 	if len(out) == 0 {
@@ -99,6 +100,7 @@ func (p *Provider) LendRates(ctx context.Context, asset id.Asset) ([]model.LendR
 			BorrowAPY:   borrow,
 			Utilization: 0,
 			FetchedAt:   now,
+			Source:      "defillama:/pools project=lendle chain=mantle",
 		})
 	}
 	if len(out) == 0 {

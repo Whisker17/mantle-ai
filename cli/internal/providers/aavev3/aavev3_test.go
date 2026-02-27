@@ -167,3 +167,27 @@ func decodeAddressArg(data string) string {
 	encodedArg := trimmed[8 : 8+64]
 	return strings.ToLower(common.HexToAddress("0x" + encodedArg[24:]).Hex())
 }
+
+func TestParseReserveOverrides(t *testing.T) {
+	input := "USDC:0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9:6,WMNT:0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8:18"
+	reserves, err := parseReserveOverrides(input)
+	if err != nil {
+		t.Fatalf("parseReserveOverrides failed: %v", err)
+	}
+	if len(reserves) != 2 {
+		t.Fatalf("expected 2 reserves, got %d", len(reserves))
+	}
+	if reserves[0].Symbol != "USDC" || reserves[0].Decimals != 6 {
+		t.Fatalf("unexpected first reserve: %+v", reserves[0])
+	}
+	if !strings.EqualFold(reserves[1].Address.Hex(), "0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8") {
+		t.Fatalf("unexpected second reserve address: %s", reserves[1].Address.Hex())
+	}
+}
+
+func TestParseReserveOverridesRejectsInvalidEntry(t *testing.T) {
+	_, err := parseReserveOverrides("USDC:not-an-address:6")
+	if err == nil {
+		t.Fatal("expected parseReserveOverrides to fail for invalid address")
+	}
+}
