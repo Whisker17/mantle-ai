@@ -29,3 +29,15 @@ Build docs:
 ```bash
 npm run docs:build
 ```
+
+## Deploy Docs to GitHub Pages
+
+The repository includes a Pages workflow at `.github/workflows/deploy-docs.yml`.
+
+- Trigger: push to `main` when files under `docs/**` change
+- Publish target: `https://<username>.github.io/<repo>/`
+
+One-time setup in GitHub repository settings:
+
+1. Open `Settings -> Pages`.
+2. Set `Source` to `GitHub Actions`.
